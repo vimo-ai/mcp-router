@@ -54,12 +54,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     var httpServer: HTTPServer?
     let router = MCPRouter.shared
 
+    // Sparkle 更新 delegate
+    private lazy var sparkleDelegate = SparkleUpdaterDelegate()
+
     // Sparkle 更新控制器
-    let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: nil,
-        userDriverDelegate: nil
-    )
+    lazy var updaterController: SPUStandardUpdaterController = {
+        return SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: sparkleDelegate,
+            userDriverDelegate: nil
+        )
+    }()
 
     // 防抖定时器：避免频繁重启
     private var restartDebounceTimer: Timer?
@@ -361,5 +366,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+}
+
+// MARK: - Sparkle Updater Delegate
+
+class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    /// 返回允许的更新 channels
+    /// 根据用户设置决定是否包含 beta channel
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        // 读取用户设置
+        let allowPrerelease = UserDefaults.standard.bool(forKey: "mcp-router.allowPrereleaseUpdates")
+
+        if allowPrerelease {
+            // 允许 beta channel
+            print("🔔 Sparkle: 允许 beta channel 更新")
+            return Set(["beta"])
+        } else {
+            // 只允许默认 channel（稳定版）
+            print("🔔 Sparkle: 仅允许稳定版更新")
+            return Set()
+        }
+    }
+
+    /// Sparkle 加载完 appcast 后调用
+    func updater(_ updater: SPUUpdater, didFinishLoading appcast: SUAppcast) {
+        print("📦 Sparkle 成功加载 appcast，共 \(appcast.items.count) 个更新项:")
+        for item in appcast.items {
+            print("   - \(item.displayVersionString) (channel: \(item.channel ?? "default"))")
+        }
+    }
+
+    /// Sparkle 找到有效更新时调用
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        print("✅ Sparkle 找到有效更新: \(item.displayVersionString)")
+    }
+
+    /// Sparkle 没有找到更新时调用
+    func updater(_ updater: SPUUpdater, didNotFindUpdateWithError error: Error) {
+        print("❌ Sparkle 没有找到更新，错误: \(error.localizedDescription)")
     }
 }

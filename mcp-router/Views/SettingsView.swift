@@ -58,6 +58,10 @@ struct SettingsView: View {
         .onAppear {
             portInput = String(settings.serverPort)
             automaticallyChecksForUpdates = appDelegate.updaterController.updater.automaticallyChecksForUpdates
+
+            // 同步预发布版本偏好到 Sparkle
+            updatePrereleasePreference(settings.allowPrereleaseUpdates)
+
             checkGlobalInstallation()
         }
         .alert("提示", isPresented: $showingAlert) {
@@ -138,6 +142,26 @@ struct SettingsView: View {
                     .onChange(of: automaticallyChecksForUpdates) { _, newValue in
                         appDelegate.updaterController.updater.automaticallyChecksForUpdates = newValue
                     }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("接收预发布版本（Beta/RC）", isOn: Binding(
+                        get: { settings.allowPrereleaseUpdates },
+                        set: { newValue in
+                            settings.allowPrereleaseUpdates = newValue
+                            settings.updatedAt = Date()
+                            try? modelContext.save()
+                            updatePrereleasePreference(newValue)
+                        }
+                    ))
+
+                    Text("开启后可以接收 beta、alpha、rc 等测试版本的更新通知")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+
+                Divider()
 
                 Button("立即检查更新") {
                     appDelegate.updaterController.updater.checkForUpdates()
@@ -312,6 +336,18 @@ struct SettingsView: View {
             .appendingPathComponent(".claude.json")
 
         NSWorkspace.shared.open(configPath)
+    }
+
+    /// 更新 Sparkle 的预发布版本偏好
+    private func updatePrereleasePreference(_ allowed: Bool) {
+        // Sparkle 2.x+ 支持通过 UserDefaults 控制是否接收预发布版本
+        // 键名：SUEnableAutomaticUpdateChecks (legacy) 或使用新的自定义逻辑
+
+        // 简单方案：存储到我们自己的 UserDefaults，在检查更新时读取
+        UserDefaults.standard.set(allowed, forKey: "mcp-router.allowPrereleaseUpdates")
+        UserDefaults.standard.synchronize()
+
+        print(allowed ? "✅ 已开启预发布版本更新（Beta/RC）" : "📦 已关闭预发布版本更新（仅正式版）")
     }
 }
 

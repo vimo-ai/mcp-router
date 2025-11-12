@@ -11,15 +11,18 @@ import SwiftData
 @Model
 final class AppSettings {
     var serverPort: Int
+    var allowPrereleaseUpdates: Bool = false // 是否接收预发布版本（beta/alpha/rc），默认 false
     var createdAt: Date
     var updatedAt: Date
 
     init(
         serverPort: Int = 19104,
+        allowPrereleaseUpdates: Bool = false, // 默认只接收正式版
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
         self.serverPort = serverPort
+        self.allowPrereleaseUpdates = allowPrereleaseUpdates
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

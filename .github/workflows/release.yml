@@ -83,7 +83,7 @@ jobs:
                   type="application/octet-stream"
                   sparkle:version="${{ steps.version.outputs.VERSION }}"
                   sparkle:shortVersionString="${{ steps.version.outputs.VERSION }}" />
-              <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+              <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
           </item>
           EOF
 

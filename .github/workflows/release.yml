@@ -108,16 +108,16 @@ jobs:
           fi
 
           # 插入新 item 到 channel 中（在 </channel> 之前）
-          # 先读取新 item 内容
-          NEW_ITEM=$(cat new_item.xml)
-          # 使用 awk 替换
-          awk -v item="$NEW_ITEM" '
-            /<\/channel>/ {
-              print item
-            }
-            { print }
-          ' appcast.xml > appcast_tmp.xml
-          mv appcast_tmp.xml appcast.xml
+          python3 << 'PYTHON_SCRIPT'
+          with open('appcast.xml', 'r') as f:
+              content = f.read()
+          with open('new_item.xml', 'r') as f:
+              new_item = f.read()
+          # 在 </channel> 之前插入新 item
+          content = content.replace('    </channel>', new_item + '\n    </channel>')
+          with open('appcast.xml', 'w') as f:
+              f.write(content)
+          PYTHON_SCRIPT
 
       - name: Deploy appcast.xml to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3

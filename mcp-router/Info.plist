@@ -23,7 +23,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/vimo-ai/mcp-router/main/appcast.xml</string>
+	<string>https://vimo-ai.github.io/mcp-router/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>Ngfa6RMr8U3E3E59QHH4V41HP94023V31BxksIzY+28=</string>
 	<key>SUEnableAutomaticChecks</key>

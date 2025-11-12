@@ -125,6 +125,13 @@ enum MCPError: LocalizedError {
     case emptyResponse
     case toolNotFound(String)
 
+    // stdio 相关错误
+    case processNotRunning
+    case encodingError
+    case timeout
+    case cancelled
+    case invalidResponse
+
     var errorDescription: String? {
         switch self {
         case .invalidURL:
@@ -139,6 +146,16 @@ enum MCPError: LocalizedError {
             return "Empty response from server"
         case .toolNotFound(let name):
             return "Tool not found: \(name)"
+        case .processNotRunning:
+            return "进程未运行"
+        case .encodingError:
+            return "编码失败"
+        case .timeout:
+            return "请求超时"
+        case .cancelled:
+            return "请求已取消"
+        case .invalidResponse:
+            return "无效的响应"
         }
     }
 }

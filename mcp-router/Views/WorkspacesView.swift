@@ -13,10 +13,16 @@ struct WorkspacesView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var workspaces: [Workspace]
     @Query private var servers: [ServerConfig]
+    @Query private var appSettings: [AppSettings]
 
     @State private var showingAddWorkspace = false
     @State private var editingWorkspace: Workspace?
     @State private var isDragging = false
+
+    // 获取当前端口
+    private var serverPort: Int {
+        appSettings.first?.serverPort ?? 19104
+    }
 
     var body: some View {
         NavigationStack {
@@ -192,7 +198,7 @@ struct WorkspacesView: View {
 
         // 写入 .mcp.json
         do {
-            try MCPConfigManager.mergeRouterConfig(at: projectPath, token: token)
+            try MCPConfigManager.mergeRouterConfig(at: projectPath, token: token, port: serverPort)
 
             let workspace = Workspace(
                 token: token,

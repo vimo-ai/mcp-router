@@ -11,12 +11,18 @@ import SwiftData
 struct WorkspaceEditView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query private var appSettings: [AppSettings]
 
     let workspace: Workspace?
 
     @State private var name: String
     @State private var token: String
     @State private var projectPath: String
+
+    // 获取当前端口
+    private var serverPort: Int {
+        appSettings.first?.serverPort ?? 19104
+    }
 
     init(workspace: Workspace?) {
         self.workspace = workspace
@@ -51,7 +57,7 @@ struct WorkspaceEditView: View {
                 }
 
                 Section("配置预览") {
-                    Text(MCPConfigManager.generateConfigPreview(token: token))
+                    Text(MCPConfigManager.generateConfigPreview(token: token, port: serverPort))
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .padding(8)

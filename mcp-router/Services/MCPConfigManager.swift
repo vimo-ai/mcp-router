@@ -52,8 +52,9 @@ struct MCPConfigManager {
     static func mergeRouterConfig(
         at projectPath: URL,
         token: String,
-        routerURL: String = "http://localhost:3000"
+        port: Int
     ) throws {
+        let routerURL = "http://localhost:\(port)"
         let configPath = projectPath.appendingPathComponent(".mcp.json")
 
         // 读取现有配置
@@ -105,7 +106,8 @@ struct MCPConfigManager {
     }
 
     /// 生成配置示例文本（用于编辑页面预览）
-    static func generateConfigPreview(token: String, routerURL: String = "http://localhost:19104") -> String {
+    static func generateConfigPreview(token: String, port: Int) -> String {
+        let routerURL = "http://localhost:\(port)"
         let config: [String: Any] = [
             "mcpServers": [
                 "mcp-router": [

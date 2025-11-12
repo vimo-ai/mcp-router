@@ -12,10 +12,16 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Workspace.createdAt) private var workspaces: [Workspace]
+    @Query private var appSettings: [AppSettings]
 
     @Binding var selection: AppRoute?
     @State private var showingAddWorkspace = false
     @State private var isDragging = false
+
+    // 获取当前端口
+    private var serverPort: Int {
+        appSettings.first?.serverPort ?? 19104
+    }
 
     var body: some View {
         List(selection: $selection) {
@@ -157,7 +163,7 @@ struct SidebarView: View {
 
         // 写入 .mcp.json
         do {
-            try MCPConfigManager.mergeRouterConfig(at: projectPath, token: token)
+            try MCPConfigManager.mergeRouterConfig(at: projectPath, token: token, port: serverPort)
 
             let workspace = Workspace(
                 token: token,

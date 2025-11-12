@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build App
+        run: |
+          xcodebuild -project mcp-router.xcodeproj \
+                     -scheme mcp-router \
+                     -configuration Release \
+                     -archivePath build/mcp-router.xcarchive \
+                     archive
+
+          xcodebuild -exportArchive \
+                     -archivePath build/mcp-router.xcarchive \
+                     -exportPath build \
+                     -exportOptionsPlist ExportOptions.plist
+
+      - name: Create ZIP
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent mcp-router.app mcp-router-${{ steps.version.outputs.VERSION }}.zip
+
+      - name: Download Sparkle Tools
+        run: |
+          curl -LO https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz
+          tar -xf Sparkle-2.6.4.tar.xz
+
+      - name: Sign Update
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.DEPLOY }}
+        run: |
+          # 使用 Sparkle 的签名工具
+          SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | ./bin/sign_update -f - build/mcp-router-${{ steps.version.outputs.VERSION }}.zip)
+          echo "SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
+          echo "Signature: $SIGNATURE"
+
+      - name: Get ZIP size
+        id: zip_size
+        run: |
+          SIZE=$(stat -f%z "build/mcp-router-${{ steps.version.outputs.VERSION }}.zip")
+          echo "SIZE=$SIZE" >> $GITHUB_OUTPUT
+          echo "ZIP Size: $SIZE bytes"
+
+      - name: Update appcast.xml
+        run: |
+          # 创建新的 item
+          cat > new_item.xml <<EOF
+          <item>
+              <title>Version ${{ steps.version.outputs.VERSION }}</title>
+              <sparkle:version>${{ steps.version.outputs.VERSION }}</sparkle:version>
+              <sparkle:shortVersionString>${{ steps.version.outputs.VERSION }}</sparkle:shortVersionString>
+              <pubDate>$(date -R)</pubDate>
+              <description><![CDATA[
+                  <h2>What's New</h2>
+                  <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v${{ steps.version.outputs.VERSION }}">release notes</a> for details.</p>
+              ]]></description>
+              <enclosure
+                  url="https://github.com/vimo-ai/mcp-router/releases/download/v${{ steps.version.outputs.VERSION }}/mcp-router-${{ steps.version.outputs.VERSION }}.zip"
+                  sparkle:edSignature="${{ env.SIGNATURE }}"
+                  length="${{ steps.zip_size.outputs.SIZE }}"
+                  type="application/octet-stream"
+                  sparkle:version="${{ steps.version.outputs.VERSION }}"
+                  sparkle:shortVersionString="${{ steps.version.outputs.VERSION }}" />
+              <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+          </item>
+          EOF
+
+          # 如果 appcast.xml 不存在，创建它
+          if [ ! -f appcast.xml ]; then
+            cat > appcast.xml <<'APPCAST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+              <channel>
+                  <title>MCP Router Updates</title>
+                  <language>en</language>
+                  <description>Updates for MCP Router</description>
+                  <link>https://github.com/vimo-ai/mcp-router</link>
+              </channel>
+          </rss>
+          APPCAST
+          fi
+
+          # 插入新 item 到 channel 中（在 </channel> 之前）
+          sed -i '' '/<\/channel>/i\
+          '"$(cat new_item.xml)"'
+          ' appcast.xml
+
+      - name: Commit appcast.xml
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml
+          git commit -m "🔄 Update appcast.xml for v${{ steps.version.outputs.VERSION }}" || echo "No changes to commit"
+          git push origin HEAD:main || echo "Push failed, probably no changes"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/mcp-router-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

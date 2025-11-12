@@ -8,6 +8,8 @@
 import SwiftUI
 import SwiftData
 import AppKit
+import Sparkle
+import Combine
 
 @main
 struct mcp_routerApp: App {
@@ -36,6 +38,7 @@ struct mcp_routerApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             ContentView()
+                .environmentObject(appDelegate)
                 .environmentObject(appDelegate.router)
         }
         .modelContainer(sharedModelContainer)
@@ -44,12 +47,19 @@ struct mcp_routerApp: App {
 
 // MARK: - AppDelegate
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     static var sharedModelContainer: ModelContainer!
 
     var statusItem: NSStatusItem!
     var httpServer: HTTPServer?
     let router = MCPRouter.shared
+
+    // Sparkle 更新控制器
+    let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     // 防抖定时器：避免频繁重启
     private var restartDebounceTimer: Timer?
@@ -158,6 +168,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Open Settings", action: #selector(openSettings), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "Restart Server", action: #selector(restartServer), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Copy URL", action: #selector(copyURL), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "u"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit MCP Router", action: #selector(quit), keyEquivalent: "q"))
 
@@ -325,6 +337,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pasteboard.setString(url, forType: .string)
 
         showAlert(title: "已复制", message: "URL 已复制到剪贴板")
+    }
+
+    @objc func checkForUpdates() {
+        updaterController.updater.checkForUpdates()
     }
 
     @objc func quit() {

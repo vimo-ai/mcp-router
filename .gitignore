@@ -100,3 +100,9 @@ iOSInjectionProject/
 # Project specific
 .mcp.json
 .serena/
+
+# Sparkle 发布相关
+Sparkle-*/
+*.tar.xz
+build/*.zip
+build/appcast-item.xml

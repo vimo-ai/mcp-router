@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>MCP Router Updates</title>
+        <language>en</language>
+        <description>Updates for MCP Router</description>
+        <link>https://github.com/vimo-ai/mcp-router</link>
+    </channel>
+</rss>

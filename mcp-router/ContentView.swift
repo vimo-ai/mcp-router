@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    @EnvironmentObject var appDelegate: AppDelegate
     @State private var selection: AppRoute?
 
     var body: some View {

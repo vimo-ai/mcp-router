@@ -92,6 +92,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     // MARK: - Data Change Observer
 
+    @MainActor
     private func setupDataChangeObserver() {
         guard let modelContainer = Self.sharedModelContainer else {
             print("⚠️ ModelContainer not available for observer")
@@ -178,6 +179,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     // MARK: - Initialization
 
+    @MainActor
     func initializeAppSettings() {
         guard let modelContainer = Self.sharedModelContainer else {
             print("⚠️ ModelContainer not available")
@@ -195,6 +197,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         print("✅ Server 初始化已跳过，用户可通过 UI 添加")
     }
 
+    @MainActor
     func initializeDefaultWorkspace() {
         guard let modelContainer = Self.sharedModelContainer else {
             print("⚠️ ModelContainer not available")
@@ -237,10 +240,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func startHTTPServer() async {
         // 加载 Servers 和 Workspaces
-        let configs = loadServerConfigs()
+        let configs = await MainActor.run { loadServerConfigs() }
         await router.loadServers(configs)
 
-        let workspaces = loadWorkspaces()
+        let workspaces = await MainActor.run { loadWorkspaces() }
         await router.loadWorkspaces(workspaces)
 
         // 使用配置的端口
@@ -258,6 +261,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    @MainActor
     private func loadServerConfigs() -> [ServerConfig] {
         guard let modelContainer = Self.sharedModelContainer else {
             print("⚠️ ModelContainer not available")
@@ -280,6 +284,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    @MainActor
     private func loadWorkspaces() -> [Workspace] {
         guard let modelContainer = Self.sharedModelContainer else {
             print("⚠️ ModelContainer not available")

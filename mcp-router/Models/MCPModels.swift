@@ -42,6 +42,23 @@ struct JSONRPCResponse: Codable {
         self.result = nil
         self.error = error
     }
+
+    // 自定义编码,确保 result 和 error 互斥
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jsonrpc, forKey: .jsonrpc)
+        try container.encode(id, forKey: .id)
+
+        if let error = error {
+            try container.encode(error, forKey: .error)
+        } else if let result = result {
+            try container.encode(result, forKey: .result)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case jsonrpc, id, result, error
+    }
 }
 
 struct JSONRPCError: Codable {

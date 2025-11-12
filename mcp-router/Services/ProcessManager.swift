@@ -252,13 +252,12 @@ actor ProcessManager {
     private func findCommandInPath(_ command: String) -> String? {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
 
-        // 要搜索的路径
+        // 基础搜索路径(作为后备)
         let searchPaths = [
             "/opt/homebrew/bin",
             "/opt/homebrew/sbin",
             "/usr/local/bin",
             "/usr/local/sbin",
-            "\(homeDir)/.nvm/versions/node/v22.16.0/bin",
             "\(homeDir)/.local/bin",
             "/usr/bin",
             "/bin",

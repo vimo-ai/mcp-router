@@ -413,7 +413,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = K7T2J28754;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -436,7 +436,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.2-beta.2;
+				MARKETING_VERSION = 0.0.2-beta.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-router";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -462,7 +462,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = K7T2J28754;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -485,7 +485,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.2-beta.2;
+				MARKETING_VERSION = 0.0.2-beta.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-router";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -509,12 +509,12 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = K7T2J28754;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.0.2-beta.2;
+				MARKETING_VERSION = 0.0.2-beta.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -531,12 +531,12 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = K7T2J28754;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.0.2-beta.2;
+				MARKETING_VERSION = 0.0.2-beta.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -552,11 +552,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = K7T2J28754;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
-				MARKETING_VERSION = 0.0.2-beta.2;
+				MARKETING_VERSION = 0.0.2-beta.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -572,11 +572,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = K7T2J28754;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
-				MARKETING_VERSION = 0.0.2-beta.2;
+				MARKETING_VERSION = 0.0.2-beta.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;

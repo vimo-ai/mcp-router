@@ -19,6 +19,9 @@ final class MCPRouter: ObservableObject {
     private var workspaces: [String: Workspace] = [:]  // token -> Workspace
     private var defaultWorkspace: Workspace?
 
+    // stdio 进程池
+    private var stdioProcessPool = WorkspaceProcessPool()
+
     private init() {}
 
     // MARK: - Workspace Management
@@ -69,11 +72,15 @@ final class MCPRouter: ObservableObject {
         serverConfigs = configs
 
         for config in configs {
-            let client = MCPClient(config: config)
-            servers[config.name] = client
+            if config.type == .http {
+                // HTTP 类型
+                let client = MCPClient(config: config)
+                servers[config.name] = client
+            }
+            // stdio 类型在需要时动态创建
         }
 
-        print("✅ 已加载 \(servers.count) 个 MCP Servers")
+        print("✅ 已加载 \(servers.count) 个 HTTP Servers")
     }
 
     // MARK: - Router Tools (元工具)
@@ -87,23 +94,41 @@ final class MCPRouter: ObservableObject {
 
         return [
             MCPTool(
-                name: "mcp_router/list",
+                name: "mcp_router/list_servers",
                 description: """
-                📋 列出所有可用的 MCP Servers 和工具
+                📋 列出所有可用的 MCP Servers
 
                 已加载的 Servers:
                 \(serverSummary)
 
-                调用此工具查看每个 Server 的具体工具列表。
+                返回 Server 列表(不含工具详情,节省 tokens)。
+                使用 mcp_router/list_tools 查看某个 Server 的工具列表。
+                """,
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([:])
+                ]
+            ),
+            MCPTool(
+                name: "mcp_router/list_tools",
+                description: """
+                🔧 列出指定 Server 的所有工具
+
+                参数:
+                - server: Server 名称(必填)
+
+                返回工具名称和描述列表。
+                使用 mcp_router/describe 查看工具的详细参数。
                 """,
                 inputSchema: [
                     "type": AnyCodable("object"),
                     "properties": AnyCodable([
                         "server": [
                             "type": "string",
-                            "description": "可选：只列出指定 Server 的工具"
+                            "description": "Server 名称"
                         ] as [String: Any]
-                    ])
+                    ]),
+                    "required": AnyCodable(["server"])
                 ]
             ),
             MCPTool(
@@ -169,36 +194,18 @@ final class MCPRouter: ObservableObject {
 
     // MARK: - Tool Handlers
 
-    /// 处理 mcp_router/list
-    func handleList(filterServer: String?, workspace: Workspace?) async throws -> AnyCodable {
+    /// 处理 mcp_router/list_servers - 只返回 Server 列表(不含工具)
+    func handleListServers(workspace: Workspace?) async throws -> AnyCodable {
         var servers: [[String: Any]] = []
 
         // 获取 Workspace 的有效 Server 列表
         let effectiveServers = getEffectiveServers(for: workspace)
-        let effectiveServerNames = Set(effectiveServers.map { $0.name })
 
-        for (name, client) in self.servers {
-            // 只返回 Workspace 启用的 Server
-            guard effectiveServerNames.contains(name) else {
-                continue
-            }
-
-            if let filter = filterServer, name != filter {
-                continue
-            }
-
-            let tools = try await client.listTools()
-            let config = serverConfigs.first { $0.name == name }!
-
+        for config in effectiveServers {
             servers.append([
-                "name": name,
+                "name": config.name,
                 "description": config.serverDescription,
-                "tools": tools.map { tool in
-                    [
-                        "name": tool.name,
-                        "description": tool.description
-                    ]
-                }
+                "type": config.type.rawValue
             ])
         }
 
@@ -207,8 +214,46 @@ final class MCPRouter: ObservableObject {
         ])
     }
 
+    /// 处理 mcp_router/list_tools - 返回指定 Server 的工具列表
+    func handleListTools(serverName: String, workspace: Workspace?) async throws -> AnyCodable {
+        // 查找 server 配置
+        guard let config = serverConfigs.first(where: { $0.name == serverName }) else {
+            throw MCPError.toolNotFound("Server '\(serverName)' not found")
+        }
+
+        let tools: [MCPTool]
+        if config.type == .http {
+            // HTTP 类型
+            guard let client = servers[serverName] else {
+                throw MCPError.toolNotFound("Server '\(serverName)' not found")
+            }
+            tools = try await client.listTools()
+        } else {
+            // stdio 类型
+            let workspaceToken = workspace?.token ?? "default"
+            let stdioClient = try await stdioProcessPool.getOrCreateClient(
+                workspaceToken: workspaceToken,
+                config: config
+            )
+            tools = try await stdioClient.listTools()
+        }
+
+        // 只返回工具名称和简短描述
+        let toolsList = tools.map { tool in
+            [
+                "name": tool.name,
+                "description": tool.description
+            ]
+        }
+
+        return AnyCodable([
+            "server": serverName,
+            "tools": toolsList
+        ])
+    }
+
     /// 处理 mcp_router/describe
-    func handleDescribe(toolPath: String) async throws -> String {
+    func handleDescribe(toolPath: String, workspace: Workspace?) async throws -> String {
         let parts = toolPath.split(separator: "/")
         guard parts.count == 2 else {
             throw MCPError.toolNotFound("Invalid tool path format")
@@ -217,11 +262,28 @@ final class MCPRouter: ObservableObject {
         let serverName = String(parts[0])
         let toolName = String(parts[1])
 
-        guard let client = servers[serverName] else {
+        // 查找 server 配置
+        guard let config = serverConfigs.first(where: { $0.name == serverName }) else {
             throw MCPError.toolNotFound("Server '\(serverName)' not found")
         }
 
-        let tools = try await client.listTools()
+        let tools: [MCPTool]
+        if config.type == .http {
+            // HTTP 类型
+            guard let client = servers[serverName] else {
+                throw MCPError.toolNotFound("Server '\(serverName)' not found")
+            }
+            tools = try await client.listTools()
+        } else {
+            // stdio 类型
+            let workspaceToken = workspace?.token ?? "default"
+            let stdioClient = try await stdioProcessPool.getOrCreateClient(
+                workspaceToken: workspaceToken,
+                config: config
+            )
+            tools = try await stdioClient.listTools()
+        }
+
         guard let tool = tools.first(where: { $0.name == toolName }) else {
             throw MCPError.toolNotFound("Tool '\(toolName)' not found in server '\(serverName)'")
         }
@@ -232,15 +294,27 @@ final class MCPRouter: ObservableObject {
     /// 处理实际的工具调用
     func handleToolCall(name: String, arguments: [String: AnyCodable], workspace: Workspace?) async throws -> AnyCodable {
         // Router 自身的工具
-        if name == "mcp_router/list" {
-            let filterServer = arguments["server"]?.value as? String
-            let result = try await handleList(filterServer: filterServer, workspace: workspace)
-
-            // 返回结构化数据 + 可读文本
+        if name == "mcp_router/list_servers" {
+            let result = try await handleListServers(workspace: workspace)
             let serversData = result.value as? [String: Any]
-            let formattedText = formatListResult(serversData ?? [:])
+            let formattedText = formatListServersResult(serversData ?? [:])
 
-            // 标准 MCP 格式
+            return AnyCodable([
+                "content": [
+                    [
+                        "type": "text",
+                        "text": formattedText
+                    ] as [String: Any]
+                ] as [[String: Any]]
+            ] as [String: Any])
+        } else if name == "mcp_router/list_tools" {
+            guard let serverName = arguments["server"]?.value as? String else {
+                throw MCPError.toolNotFound("Missing 'server' parameter")
+            }
+            let result = try await handleListTools(serverName: serverName, workspace: workspace)
+            let toolsData = result.value as? [String: Any]
+            let formattedText = formatListToolsResult(toolsData ?? [:])
+
             return AnyCodable([
                 "content": [
                     [
@@ -253,7 +327,7 @@ final class MCPRouter: ObservableObject {
             guard let toolPath = arguments["tool"]?.value as? String else {
                 throw MCPError.toolNotFound("Missing 'tool' parameter")
             }
-            let result = try await handleDescribe(toolPath: toolPath)
+            let result = try await handleDescribe(toolPath: toolPath, workspace: workspace)
             return AnyCodable([
                 "content": [
                     [
@@ -280,12 +354,27 @@ final class MCPRouter: ObservableObject {
             let serverName = String(parts[0])
             let toolName = String(parts[1])
 
-            guard let client = servers[serverName] else {
+            // 查找 server 配置
+            guard let config = serverConfigs.first(where: { $0.name == serverName }) else {
                 throw MCPError.toolNotFound("Server '\(serverName)' not found")
             }
 
-            // 转发到后端 Server
-            return try await client.callTool(name: toolName, arguments: convertedArgs)
+            // 根据类型调用
+            if config.type == .http {
+                // HTTP 类型
+                guard let client = servers[serverName] else {
+                    throw MCPError.toolNotFound("Server '\(serverName)' not found")
+                }
+                return try await client.callTool(name: toolName, arguments: convertedArgs)
+            } else {
+                // stdio 类型
+                let workspaceToken = workspace?.token ?? "default"
+                let stdioClient = try await stdioProcessPool.getOrCreateClient(
+                    workspaceToken: workspaceToken,
+                    config: config
+                )
+                return try await stdioClient.callTool(name: toolName, arguments: convertedArgs)
+            }
         }
 
         // 不应该走到这里（所有工具都应该通过 mcp_router/call）
@@ -294,8 +383,8 @@ final class MCPRouter: ObservableObject {
 
     // MARK: - Formatters
 
-    private func formatListResult(_ result: [String: Any]) -> String {
-        var lines = ["📋 可用的 MCP Servers 和工具:\n"]
+    private func formatListServersResult(_ result: [String: Any]) -> String {
+        var lines = ["📋 可用的 MCP Servers:\n"]
 
         guard let serversList = result["servers"] as? [[String: Any]] else {
             return "无可用 Servers"
@@ -304,33 +393,38 @@ final class MCPRouter: ObservableObject {
         for serverData in serversList {
             guard let name = serverData["name"] as? String,
                   let description = serverData["description"] as? String,
-                  let tools = serverData["tools"] as? [[String: Any]] else {
+                  let type = serverData["type"] as? String else {
                 continue
             }
 
-            lines.append("📦 **\(name)**: \(description)")
-
-            let toolNames = tools.compactMap { $0["name"] as? String }
-            lines.append("   工具 (\(tools.count)): \(toolNames.joined(separator: ", "))\n")
-
-            // 列出每个工具的简短描述
-            for tool in tools.prefix(5) {
-                if let toolName = tool["name"] as? String,
-                   let toolDesc = tool["description"] as? String {
-                    let shortDesc = toolDesc.components(separatedBy: "\n").first ?? toolDesc
-                    lines.append("     • \(toolName): \(shortDesc.prefix(60))...")
-                }
-            }
-            if tools.count > 5 {
-                lines.append("     ... 还有 \(tools.count - 5) 个工具")
-            }
-            lines.append("")
+            lines.append("📦 **\(name)** (\(type)): \(description)")
         }
 
-        lines.append("\n💡 使用方式:")
-        lines.append("  1. 调用 mcp_router/describe 查看工具参数")
-        lines.append("  2. 直接调用 server_name/tool_name 使用工具")
-        lines.append("  示例: 调用 context7/resolve-library-id 而非使用 npx 命令")
+        lines.append("\n💡 下一步:")
+        lines.append("  使用 mcp_router/list_tools 查看某个 Server 的工具列表")
+        lines.append("  示例: mcp_router/list_tools {\"server\": \"chrome-devtools\"}")
+        return lines.joined(separator: "\n")
+    }
+
+    private func formatListToolsResult(_ result: [String: Any]) -> String {
+        guard let serverName = result["server"] as? String,
+              let tools = result["tools"] as? [[String: Any]] else {
+            return "无工具数据"
+        }
+
+        var lines = ["🔧 Server: \(serverName) 的工具列表 (\(tools.count) 个):\n"]
+
+        for tool in tools {
+            if let name = tool["name"] as? String,
+               let description = tool["description"] as? String {
+                let shortDesc = description.components(separatedBy: "\n").first ?? description
+                lines.append("• **\(name)**: \(shortDesc.prefix(80))")
+            }
+        }
+
+        lines.append("\n💡 下一步:")
+        lines.append("  使用 mcp_router/describe 查看工具的详细参数")
+        lines.append("  示例: mcp_router/describe {\"tool\": \"\(serverName)/tool_name\"}")
         return lines.joined(separator: "\n")
     }
 

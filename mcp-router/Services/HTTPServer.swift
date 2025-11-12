@@ -102,17 +102,33 @@ actor HTTPServer {
         // 处理 JSON-RPC 请求
         do {
             let jsonRequest = try JSONDecoder().decode(JSONRPCRequest.self, from: bodyData)
-            let result = try await handleJSONRPC(request: jsonRequest, headers: headers)
-            let response = JSONRPCResponse(id: jsonRequest.id, result: result)
-            let responseData = try JSONEncoder().encode(response)
-            let responseString = String(data: responseData, encoding: .utf8)!
 
-            sendResponse(
-                connection: connection,
-                statusCode: 200,
-                body: responseString,
-                contentType: "application/json"
-            )
+            // 检查是否为通知(notification): id 为 nil 或 method 以 "notifications/" 开头
+            let isNotification = jsonRequest.id == nil || jsonRequest.method.hasPrefix("notifications/")
+
+            if isNotification {
+                // 通知不需要响应,直接处理并返回 204 No Content
+                _ = try? await handleJSONRPC(request: jsonRequest, headers: headers)
+                sendResponse(
+                    connection: connection,
+                    statusCode: 204,
+                    body: "",
+                    contentType: "application/json"
+                )
+            } else {
+                // 普通请求需要返回响应
+                let result = try await handleJSONRPC(request: jsonRequest, headers: headers)
+                let response = JSONRPCResponse(id: jsonRequest.id, result: result)
+                let responseData = try JSONEncoder().encode(response)
+                let responseString = String(data: responseData, encoding: .utf8)!
+
+                sendResponse(
+                    connection: connection,
+                    statusCode: 200,
+                    body: responseString,
+                    contentType: "application/json"
+                )
+            }
         } catch {
             let errorResponse = JSONRPCResponse(
                 id: nil,

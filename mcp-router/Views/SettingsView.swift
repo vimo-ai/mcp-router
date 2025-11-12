@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var automaticallyChecksForUpdates = false
+    @State private var isInstalledToGlobal = false
+    @State private var isCheckingGlobalInstall = true
 
     private var settings: AppSettings {
         if let existing = settingsArray.first {
@@ -42,6 +44,11 @@ struct SettingsView: View {
                 // 更新设置
                 updateSection
 
+                Divider()
+
+                // 全局配置
+                globalConfigSection
+
                 Spacer()
             }
             .padding(24)
@@ -51,6 +58,7 @@ struct SettingsView: View {
         .onAppear {
             portInput = String(settings.serverPort)
             automaticallyChecksForUpdates = appDelegate.updaterController.updater.automaticallyChecksForUpdates
+            checkGlobalInstallation()
         }
         .alert("提示", isPresented: $showingAlert) {
             Button("确定", role: .cancel) {}
@@ -146,6 +154,60 @@ struct SettingsView: View {
         }
     }
 
+    private var globalConfigSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Claude 全局配置")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 12) {
+                if isCheckingGlobalInstall {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("检查安装状态...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        if isInstalledToGlobal {
+                            Button("打开配置文件") {
+                                openClaudeConfig()
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Text("✓ 已安装")
+                                .font(.subheadline)
+                                .foregroundColor(.green)
+
+                            Button("卸载") {
+                                uninstallFromGlobal()
+                            }
+                            .buttonStyle(.bordered)
+                            .foregroundColor(.orange)
+                        } else {
+                            Button("安装到全局配置") {
+                                installToGlobal()
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Text("未安装")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                Text("将 mcp-router 安装到 ~/.claude.json 的根配置，所有 workspace 都可使用。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(16)
+            .background(Color(white: 0.05))
+            .cornerRadius(12)
+        }
+    }
+
     // MARK: - Actions
 
     private func applyPortChange() {
@@ -174,6 +236,82 @@ struct SettingsView: View {
             showingAlert = true
             print("❌ 保存端口失败: \(error)")
         }
+    }
+
+    // MARK: - Global Config Actions
+
+    private func checkGlobalInstallation() {
+        isCheckingGlobalInstall = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let installed = try ClaudeConfigManager.isInstalledToGlobal()
+
+                DispatchQueue.main.async {
+                    self.isInstalledToGlobal = installed
+                    self.isCheckingGlobalInstall = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isInstalledToGlobal = false
+                    self.isCheckingGlobalInstall = false
+                    print("❌ 检查全局配置失败: \(error)")
+                }
+            }
+        }
+    }
+
+    private func installToGlobal() {
+        // 生成全局 token（固定的，用于全局配置）
+        let globalToken = "global-mcp-router-token"
+        let port = settings.serverPort
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try ClaudeConfigManager.installToGlobal(token: globalToken, port: port)
+
+                DispatchQueue.main.async {
+                    self.isInstalledToGlobal = true
+                    self.alertMessage = "✓ 已成功安装到 ~/.claude.json 的全局配置\n\n所有 workspace 现在都可以使用 mcp-router。"
+                    self.showingAlert = true
+                    print("✅ 已安装到全局配置")
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "安装失败: \(error.localizedDescription)\n\n请检查 ~/.claude.json 文件权限。"
+                    self.showingAlert = true
+                    print("❌ 安装到全局配置失败: \(error)")
+                }
+            }
+        }
+    }
+
+    private func uninstallFromGlobal() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try ClaudeConfigManager.uninstallFromGlobal()
+
+                DispatchQueue.main.async {
+                    self.isInstalledToGlobal = false
+                    self.alertMessage = "✓ 已从全局配置中卸载"
+                    self.showingAlert = true
+                    print("✅ 已从全局配置卸载")
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "卸载失败: \(error.localizedDescription)"
+                    self.showingAlert = true
+                    print("❌ 卸载失败: \(error)")
+                }
+            }
+        }
+    }
+
+    private func openClaudeConfig() {
+        let configPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude.json")
+
+        NSWorkspace.shared.open(configPath)
     }
 }
 

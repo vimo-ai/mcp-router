@@ -7,14 +7,17 @@
 
 import SwiftUI
 import SwiftData
+import Sparkle
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appDelegate: AppDelegate
     @Query private var settingsArray: [AppSettings]
 
     @State private var portInput: String = ""
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @State private var automaticallyChecksForUpdates = false
 
     private var settings: AppSettings {
         if let existing = settingsArray.first {
@@ -34,6 +37,11 @@ struct SettingsView: View {
                 // 服务器设置
                 serverSection
 
+                Divider()
+
+                // 更新设置
+                updateSection
+
                 Spacer()
             }
             .padding(24)
@@ -42,6 +50,7 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .onAppear {
             portInput = String(settings.serverPort)
+            automaticallyChecksForUpdates = appDelegate.updaterController.updater.automaticallyChecksForUpdates
         }
         .alert("提示", isPresented: $showingAlert) {
             Button("确定", role: .cancel) {}
@@ -104,6 +113,32 @@ struct SettingsView: View {
                 Text("端口范围: 1024-65535。修改后需要重启服务器。")
                     .font(.caption)
                     .foregroundColor(.orange)
+            }
+            .padding(16)
+            .background(Color(white: 0.05))
+            .cornerRadius(12)
+        }
+    }
+
+    private var updateSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("自动更新")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("自动检查更新", isOn: $automaticallyChecksForUpdates)
+                    .onChange(of: automaticallyChecksForUpdates) { _, newValue in
+                        appDelegate.updaterController.updater.automaticallyChecksForUpdates = newValue
+                    }
+
+                Button("立即检查更新") {
+                    appDelegate.updaterController.updater.checkForUpdates()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Text("应用会定期检查更新并在后台下载。支持增量更新以节省带宽。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             .padding(16)
             .background(Color(white: 0.05))

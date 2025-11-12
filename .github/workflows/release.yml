@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build App
+        run: |
+          xcodebuild -project mcp-router.xcodeproj \
+                     -scheme mcp-router \
+                     -configuration Release \
+                     -archivePath build/mcp-router.xcarchive \
+                     -destination 'generic/platform=macOS' \
+                     CODE_SIGN_IDENTITY="-" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO \
+                     archive
+
+          # 直接从 xcarchive 复制 App
+          cp -R build/mcp-router.xcarchive/Products/Applications/mcp-router.app build/
+
+      - name: Create ZIP
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent mcp-router.app mcp-router-${{ steps.version.outputs.VERSION }}.zip
+
+      - name: Download Sparkle Tools
+        run: |
+          curl -LO https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz
+          tar -xf Sparkle-2.6.4.tar.xz
+
+      - name: Sign Update
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.DEPLOY }}
+        run: |
+          # 使用 Sparkle 的签名工具
+          FULL_OUTPUT=$(echo "$SPARKLE_PRIVATE_KEY" | ./bin/sign_update -f - build/mcp-router-${{ steps.version.outputs.VERSION }}.zip)
+          # 提取签名值（去掉 sparkle:edSignature= 前缀和引号）
+          SIGNATURE=$(echo "$FULL_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
+          echo "SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
+          echo "Signature: $SIGNATURE"
+
+      - name: Get ZIP size
+        id: zip_size
+        run: |
+          SIZE=$(stat -f%z "build/mcp-router-${{ steps.version.outputs.VERSION }}.zip")
+          echo "SIZE=$SIZE" >> $GITHUB_OUTPUT
+          echo "ZIP Size: $SIZE bytes"
+
+      - name: Update appcast.xml
+        run: |
+          # 创建新的 item
+          cat > new_item.xml <<EOF
+          <item>
+              <title>Version ${{ steps.version.outputs.VERSION }}</title>
+              <sparkle:version>${{ steps.version.outputs.VERSION }}</sparkle:version>
+              <sparkle:shortVersionString>${{ steps.version.outputs.VERSION }}</sparkle:shortVersionString>
+              <pubDate>$(date -R)</pubDate>
+              <description><![CDATA[
+                  <h2>What's New</h2>
+                  <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v${{ steps.version.outputs.VERSION }}">release notes</a> for details.</p>
+              ]]></description>
+              <enclosure
+                  url="https://github.com/vimo-ai/mcp-router/releases/download/v${{ steps.version.outputs.VERSION }}/mcp-router-${{ steps.version.outputs.VERSION }}.zip"
+                  sparkle:edSignature="${{ env.SIGNATURE }}"
+                  length="${{ steps.zip_size.outputs.SIZE }}"
+                  type="application/octet-stream"
+                  sparkle:version="${{ steps.version.outputs.VERSION }}"
+                  sparkle:shortVersionString="${{ steps.version.outputs.VERSION }}" />
+              <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+          </item>
+          EOF
+
+          # 如果 appcast.xml 不存在，创建它
+          if [ ! -f appcast.xml ]; then
+            cat > appcast.xml <<'APPCAST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+              <channel>
+                  <title>MCP Router Updates</title>
+                  <language>en</language>
+                  <description>Updates for MCP Router</description>
+                  <link>https://github.com/vimo-ai/mcp-router</link>
+              </channel>
+          </rss>
+          APPCAST
+          fi
+
+          # 插入新 item 到 channel 中（在 </channel> 之前）
+          python3 << 'PYTHON_SCRIPT'
+          with open('appcast.xml', 'r') as f:
+              content = f.read()
+          with open('new_item.xml', 'r') as f:
+              new_item = f.read()
+          # 在 </channel> 之前插入新 item
+          content = content.replace('    </channel>', new_item + '\n    </channel>')
+          with open('appcast.xml', 'w') as f:
+              f.write(content)
+          PYTHON_SCRIPT
+
+      - name: Deploy appcast.xml to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          publish_branch: gh-pages
+          keep_files: false
+          destination_dir: .
+        env:
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/mcp-router-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

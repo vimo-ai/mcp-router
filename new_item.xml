@@ -1,0 +1,18 @@
+<item>
+    <title>Version 0.0.1</title>
+    <sparkle:version>0.0.1</sparkle:version>
+    <sparkle:shortVersionString>0.0.1</sparkle:shortVersionString>
+    <pubDate>Wed, 12 Nov 2025 15:01:16 +0000</pubDate>
+    <description><![CDATA[
+        <h2>What's New</h2>
+        <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v0.0.1">release notes</a> for details.</p>
+    ]]></description>
+    <enclosure
+        url="https://github.com/vimo-ai/mcp-router/releases/download/v0.0.1/mcp-router-0.0.1.zip"
+        sparkle:edSignature="OM12o5QMPAMR+U8dkSB63CI1CZ1dujPYGBgKozBoscuem6AO1IL1dCBdgC/00FJMJ1ZK2xxZ8gV/LaJCMSrwAw=="
+        length="1419965"
+        type="application/octet-stream"
+        sparkle:version="0.0.1"
+        sparkle:shortVersionString="0.0.1" />
+    <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+</item>

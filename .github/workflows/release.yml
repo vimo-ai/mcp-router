@@ -52,7 +52,9 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.DEPLOY }}
         run: |
           # 使用 Sparkle 的签名工具
-          SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | ./bin/sign_update -f - build/mcp-router-${{ steps.version.outputs.VERSION }}.zip)
+          FULL_OUTPUT=$(echo "$SPARKLE_PRIVATE_KEY" | ./bin/sign_update -f - build/mcp-router-${{ steps.version.outputs.VERSION }}.zip)
+          # 提取签名值（去掉 sparkle:edSignature= 前缀和引号）
+          SIGNATURE=$(echo "$FULL_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
           echo "SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
           echo "Signature: $SIGNATURE"
 
@@ -103,9 +105,8 @@ jobs:
           fi
 
           # 插入新 item 到 channel 中（在 </channel> 之前）
-          sed -i '' '/<\/channel>/i\
-          '"$(cat new_item.xml)"'
-          ' appcast.xml
+          # 使用 perl 替代 sed，因为在 macOS 上更可靠
+          perl -i -pe 'BEGIN{undef $/;} s#</channel>#`cat new_item.xml`\n    </channel>#smg' appcast.xml
 
       - name: Commit appcast.xml
         run: |

@@ -28,12 +28,14 @@ jobs:
                      -scheme mcp-router \
                      -configuration Release \
                      -archivePath build/mcp-router.xcarchive \
+                     -destination 'generic/platform=macOS' \
+                     CODE_SIGN_IDENTITY="-" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO \
                      archive
 
-          xcodebuild -exportArchive \
-                     -archivePath build/mcp-router.xcarchive \
-                     -exportPath build \
-                     -exportOptionsPlist ExportOptions.plist
+          # 直接从 xcarchive 复制 App
+          cp -R build/mcp-router.xcarchive/Products/Applications/mcp-router.app build/
 
       - name: Create ZIP
         run: |

@@ -7,15 +7,16 @@
 MCP Router 使用**双版本号系统**：
 
 ### 1. CFBundleVersion（构建版本号）
-- **位置**：`project.pbxproj` 中的 `CURRENT_PROJECT_VERSION`
 - **格式**：纯数字递增（如 1, 2, 3, 4...）
 - **用途**：Sparkle 用于版本比较
-- **规则**：每次发布必须递增，不能回退
+- **管理**：✨ **GitHub Actions 自动递增**，无需手动维护
+- **规则**：每次发布自动 +1，永不回退
 
 ### 2. CFBundleShortVersionString（显示版本号）
 - **位置**：`project.pbxproj` 中的 `MARKETING_VERSION`
 - **格式**：语义化版本（如 0.0.2, 0.0.3-beta.1, 1.0.0）
 - **用途**：用户可见的版本号
+- **管理**：手动修改并提交
 - **规则**：遵循语义化版本规范
 
 ## 重要原则
@@ -54,48 +55,48 @@ Appcast 更新：
 
 ### 发布新版本（稳定版或 Beta 版）
 
-1. **更新版本号**
+**现在只需 3 步！**
 
-在 Xcode 项目中：
+1. **更新语义化版本号**
+
+在 Xcode 项目中修改 `MARKETING_VERSION`：
 ```bash
 # 方法1：直接修改 project.pbxproj
-CURRENT_PROJECT_VERSION = X+1  # 必须递增
 MARKETING_VERSION = X.Y.Z[-beta.N]
 
 # 方法2：使用 Xcode
-# Target → General → Version: X.Y.Z
-# Build: X+1
+# Target → General → Version: X.Y.Z[-beta.N]
 ```
 
-2. **提交代码**
+⚠️ **注意**：不需要修改 `CURRENT_PROJECT_VERSION`（build number），它会自动递增！
+
+2. **提交代码并打 Tag**
 ```bash
 git add .
-git commit -m "chore: bump version to X.Y.Z (build X+1)"
-```
-
-3. **创建 Git Tag**
-```bash
+git commit -m "chore: bump version to X.Y.Z[-beta.N]"
 git tag vX.Y.Z[-beta.N]
 git push origin main
 git push origin vX.Y.Z[-beta.N]
 ```
 
-4. **GitHub Actions 自动构建**
-- 触发 `.github/workflows/release.yml`
-- 自动生成 appcast.xml
-- `sparkle:version` 使用 `CFBundleVersion`（纯数字）
-- `sparkle:shortVersionString` 使用 `CFBundleShortVersionString`（语义化版本）
+3. **GitHub Actions 自动完成剩余工作**
+- ✅ 从 appcast.xml 读取最新 build number
+- ✅ 自动递增 build number（+1）
+- ✅ 构建应用时注入新的 build number
+- ✅ 生成 appcast.xml，使用纯数字 build number
+- ✅ 自动添加 beta channel 标签（如果版本号包含 beta/alpha/rc）
+- ✅ 签名并发布
 
 ## 版本号映射表
 
-| 发布时间 | CFBundleVersion | CFBundleShortVersionString | Channel | 说明 |
-|---------|----------------|---------------------------|---------|------|
+| 发布时间 | CFBundleVersion（自动） | CFBundleShortVersionString（手动） | Channel（自动） | 说明 |
+|---------|-------------------|------------------------------|---------------|------|
 | 初始版本 | 1 | 0.0.1 | default | 首次发布 |
-| 稳定版 | 2 | 0.0.2 | default | 修复版本号问题 |
-| Beta 版 | 3 | 0.0.3-beta.1 | beta | 测试 beta channel |
-| 稳定版 | 4 | 0.0.3 | default | 正式版 |
-| Beta 版 | 5 | 0.0.4-beta.1 | beta | 下一个功能测试 |
-| 稳定版 | 6 | 0.0.4 | default | 功能稳定发布 |
+| Beta 版 | 2 | 0.0.2-beta.2 | beta | 第二个 beta |
+| Beta 版 | 3 | 0.0.2-beta.3 | beta | 添加 beta channel 功能 |
+| Beta 版 | 4 | 0.0.2-beta.4 | beta | UI 改进 |
+| Beta 版 | 5（自动递增） | 0.0.2-beta.5 | beta（自动检测） | 下一个 beta |
+| 稳定版 | 6（自动递增） | 0.0.3 | default（自动检测） | 正式版 |
 
 ## Beta Channel 系统
 

@@ -38,7 +38,7 @@ struct ClaudeConfigManager {
     // MARK: - 安装和卸载
 
     /// 安装到全局配置
-    static func installToGlobal(token: String, port: Int) throws {
+    static func installToGlobal(port: Int) throws {
         guard FileManager.default.fileExists(atPath: configPath.path) else {
             throw ClaudeConfigError.fileNotFound
         }
@@ -56,7 +56,7 @@ struct ClaudeConfigManager {
             }
 
             // 4. 构建 mcp-router 配置
-            let routerConfig = buildRouterConfig(token: token, port: port)
+            let routerConfig = buildRouterConfig(port: port)
 
             // 5. 插入或替换配置
             let modified = try insertOrReplaceRouterConfig(
@@ -177,14 +177,11 @@ struct ClaudeConfigManager {
     }
 
     /// 构建 mcp-router 配置字符串
-    private static func buildRouterConfig(token: String, port: Int) -> String {
+    private static func buildRouterConfig(port: Int) -> String {
         return """
         "mcp-router": {
               "type": "http",
-              "url": "http://localhost:\(port)",
-              "headers": {
-                "X-Workspace-Token": "\(token)"
-              }
+              "url": "http://localhost:\(port)"
             }
         """
     }
@@ -339,5 +336,28 @@ enum ClaudeConfigError: LocalizedError {
         case .backupNotFound:
             return "找不到备份文件"
         }
+    }
+}
+
+// MARK: - Provider
+
+struct ClaudeGlobalConfigProvider: GlobalConfigProvider {
+    let id = "claude"
+    let displayName = "Claude"
+    let descriptionText = "将 mcp-router 安装到 ~/.claude.json 的根配置，所有 Claude Code workspace 均可直接访问。"
+    var configPath: URL {
+        ClaudeConfigManager.configPath
+    }
+
+    func isInstalled() throws -> Bool {
+        try ClaudeConfigManager.isInstalledToGlobal()
+    }
+
+    func install(port: Int) throws {
+        try ClaudeConfigManager.installToGlobal(port: port)
+    }
+
+    func uninstall() throws {
+        try ClaudeConfigManager.uninstallFromGlobal()
     }
 }

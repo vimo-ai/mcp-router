@@ -57,12 +57,14 @@ echo ""
 echo -e "${YELLOW}💡 Build number 将由 GitHub Actions 自动管理${NC}"
 echo ""
 
-# 询问确认
-read -p "$(echo -e ${YELLOW}是否继续? [y/N]: ${NC})" -n 1 -r
-echo ""
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  echo -e "${RED}❌ 已取消${NC}"
-  exit 1
+# 如果不是 CI 环境，询问确认
+if [ -z "$CI" ]; then
+  read -p "$(echo -e ${YELLOW}是否继续? [y/N]: ${NC})" -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${RED}❌ 已取消${NC}"
+    exit 1
+  fi
 fi
 
 # 更新版本号

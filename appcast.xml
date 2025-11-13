@@ -7,7 +7,7 @@
         <link>https://github.com/vimo-ai/mcp-router</link>
 <item>
     <title>Version 0.0.2-beta.5</title>
-    <sparkle:version>1</sparkle:version>
+    <sparkle:version>4</sparkle:version>
     <sparkle:shortVersionString>0.0.2-beta.5</sparkle:shortVersionString>
     <sparkle:channel>beta</sparkle:channel>
     <pubDate>Thu, 13 Nov 2025 05:44:04 +0000</pubDate>

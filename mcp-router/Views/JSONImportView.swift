@@ -9,125 +9,428 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
+// MARK: - 数据模型
+
+/// 导入状态
+enum ImportState {
+    case editing          // 编辑 JSON
+    case duplicateCheck   // 检测到重复，选择策略
+    case importing        // 导入中
+    case completed        // 完成，显示报告
+}
+
+/// 重复处理策略
+enum DuplicateStrategy: String, CaseIterable {
+    case skip = "跳过重复项"
+    case replace = "覆盖已存在的"
+    case rename = "重命名导入"
+
+    var description: String {
+        switch self {
+        case .skip:
+            return "保留现有配置，不导入重复的服务器"
+        case .replace:
+            return "用新配置覆盖已存在的服务器"
+        case .rename:
+            return "自动重命名（如：context7 → context7-2）"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .skip: return "arrow.forward.circle"
+        case .replace: return "arrow.triangle.2.circlepath"
+        case .rename: return "doc.on.doc"
+        }
+    }
+}
+
+/// 导入结果统计
+struct ImportResult {
+    var added: [String] = []        // 新增的服务器
+    var skipped: [String] = []      // 跳过的服务器（重复）
+    var replaced: [String] = []     // 覆盖的服务器
+    var failed: [(name: String, reason: String)] = []  // 失败的服务器
+
+    var totalProcessed: Int {
+        added.count + skipped.count + replaced.count + failed.count
+    }
+
+    var successCount: Int {
+        added.count + replaced.count
+    }
+}
+
 struct JSONImportView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query private var existingServers: [ServerConfig]
 
     @State private var jsonText = ""
     @State private var errorMessage: String?
     @State private var importWarnings: [String] = []  // 导入警告信息
 
+    // 新增状态
+    @State private var importState: ImportState = .editing
+    @State private var duplicateNames: [String] = []
+    @State private var selectedStrategy: DuplicateStrategy = .skip
+    @State private var importResult = ImportResult()
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Text("Paste JSON configuration or drag a file")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-
-                TextEditor(text: $jsonText)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 300)
-                    .border(Color.gray.opacity(0.3))
-                    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                        handleDrop(providers: providers)
-                        return true
-                    }
-
-                if let errorMessage = errorMessage {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundColor(.red)
-                            .font(.caption)
-                    }
-                    .padding(8)
-                    .background(Color.red.opacity(0.1))
-                    .cornerRadius(6)
-                }
-
-                if !importWarnings.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("导入警告", systemImage: "exclamationmark.circle.fill")
-                            .foregroundColor(.orange)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-
-                        ForEach(importWarnings, id: \.self) { warning in
-                            Text("• \(warning)")
-                                .foregroundColor(.orange)
-                                .font(.caption2)
-                        }
-                    }
-                    .padding(8)
-                    .background(Color.orange.opacity(0.1))
-                    .cornerRadius(6)
-                }
-
-                HStack {
-                    Button("Load from File") {
-                        selectFile()
-                    }
-
-                    Spacer()
-
-                    Text("Expected format:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Format 1: Our export format")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-
-                    CodeBlockView(code: """
-                    {
-                      "servers": [
-                        {
-                          "name": "context7",
-                          "type": "http",
-                          "url": "https://mcp.context7.com/mcp"
-                        }
-                      ]
-                    }
-                    """)
-
-                    Text("Format 2: Claude Code .mcp.json")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 8)
-
-                    CodeBlockView(code: """
-                    {
-                      "mcpServers": {
-                        "chrome-devtools": {
-                          "type": "stdio",
-                          "command": "npx",
-                          "args": ["chrome-devtools-mcp@latest"]
-                        }
-                      }
-                    }
-                    """)
+            Group {
+                switch importState {
+                case .editing:
+                    editingView
+                case .duplicateCheck:
+                    duplicateCheckView
+                case .importing:
+                    importingView
+                case .completed:
+                    completedView
                 }
             }
-            .padding()
-            .navigationTitle("Import from JSON")
+            .navigationTitle(navigationTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(importState == .completed ? "关闭" : "取消") {
                         dismiss()
                     }
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Import") {
-                        importJSON()
+                if importState == .editing {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("导入") {
+                            startImport()
+                        }
+                        .disabled(jsonText.isEmpty)
                     }
-                    .disabled(jsonText.isEmpty)
                 }
             }
         }
         .frame(minWidth: 600, minHeight: 500)
     }
+
+    private var navigationTitle: String {
+        switch importState {
+        case .editing:
+            return "Import from JSON"
+        case .duplicateCheck:
+            return "处理重复项"
+        case .importing:
+            return "导入中..."
+        case .completed:
+            return "导入完成"
+        }
+    }
+
+    // MARK: - 编辑视图
+
+    private var editingView: some View {
+        VStack(spacing: 16) {
+            Text("Paste JSON configuration or drag a file")
+                .font(.headline)
+                .foregroundColor(.secondary)
+
+            TextEditor(text: $jsonText)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 300)
+                .border(Color.gray.opacity(0.3))
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    handleDrop(providers: providers)
+                    return true
+                }
+
+            if let errorMessage = errorMessage {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+                .padding(8)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(6)
+            }
+
+            HStack {
+                Button("Load from File") {
+                    selectFile()
+                }
+
+                Spacer()
+
+                Text("Expected format:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("支持的格式: Claude Code .mcp.json")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                CodeBlockView(code: """
+                {
+                  "mcpServers": {
+                    "chrome-devtools": {
+                      "type": "stdio",
+                      "command": "npx",
+                      "args": ["chrome-devtools-mcp@latest"]
+                    },
+                    "context7": {
+                      "type": "http",
+                      "url": "https://mcp.context7.com/mcp"
+                    }
+                  }
+                }
+                """)
+            }
+        }
+        .padding()
+    }
+
+    // MARK: - 重复检查视图
+
+    private var duplicateCheckView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.orange)
+
+            Text("检测到重复的服务器")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("以下服务器已存在：")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(duplicateNames, id: \.self) { name in
+                        HStack {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 6))
+                                .foregroundColor(.orange)
+                            Text(name)
+                                .font(.body)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(8)
+            }
+            .frame(maxHeight: 150)
+
+            Divider()
+
+            Text("如何处理这些重复项？")
+                .font(.headline)
+
+            VStack(spacing: 12) {
+                ForEach(DuplicateStrategy.allCases, id: \.self) { strategy in
+                    Button {
+                        selectedStrategy = strategy
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: strategy.icon)
+                                .font(.title3)
+                                .frame(width: 30)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(strategy.rawValue)
+                                    .font(.headline)
+                                Text(strategy.description)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            if selectedStrategy == strategy {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.blue)
+                            } else {
+                                Image(systemName: "circle")
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        .padding()
+                        .background(selectedStrategy == strategy ? Color.blue.opacity(0.1) : Color.clear)
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(selectedStrategy == strategy ? Color.blue : Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Spacer()
+
+            HStack {
+                Button("返回编辑") {
+                    importState = .editing
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button("继续导入") {
+                    performImport()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+    }
+
+    // MARK: - 导入中视图
+
+    private var importingView: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.5)
+
+            Text("正在导入...")
+                .font(.headline)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - 完成视图
+
+    private var completedView: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.green)
+
+                Text("导入完成")
+                    .font(.title)
+                    .fontWeight(.bold)
+
+                // 统计摘要
+                HStack(spacing: 40) {
+                    VStack {
+                        Text("\(importResult.totalProcessed)")
+                            .font(.title)
+                            .fontWeight(.bold)
+                        Text("总计")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    VStack {
+                        Text("\(importResult.successCount)")
+                            .font(.title)
+                            .fontWeight(.bold)
+                            .foregroundColor(.green)
+                        Text("成功")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if !importResult.failed.isEmpty {
+                        VStack {
+                            Text("\(importResult.failed.count)")
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .foregroundColor(.red)
+                            Text("失败")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(12)
+
+                // 详细列表
+                VStack(alignment: .leading, spacing: 16) {
+                    if !importResult.added.isEmpty {
+                        resultSection(
+                            title: "✅ 新增：\(importResult.added.count) 个",
+                            items: importResult.added,
+                            color: .green
+                        )
+                    }
+
+                    if !importResult.replaced.isEmpty {
+                        resultSection(
+                            title: "🔄 覆盖：\(importResult.replaced.count) 个",
+                            items: importResult.replaced,
+                            color: .blue
+                        )
+                    }
+
+                    if !importResult.skipped.isEmpty {
+                        resultSection(
+                            title: "⏭️ 跳过：\(importResult.skipped.count) 个",
+                            items: importResult.skipped,
+                            color: .orange
+                        )
+                    }
+
+                    if !importResult.failed.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("❌ 失败：\(importResult.failed.count) 个")
+                                .font(.headline)
+                                .foregroundColor(.red)
+
+                            ForEach(importResult.failed, id: \.name) { item in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("• \(item.name)")
+                                        .font(.body)
+                                    Text(item.reason)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .padding(.leading, 12)
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                }
+
+                Button {
+                    dismiss()
+                } label: {
+                    Text("完成")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding()
+        }
+    }
+
+    private func resultSection(title: String, items: [String], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(color)
+
+            ForEach(items, id: \.self) { item in
+                Text("• \(item)")
+                    .font(.body)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(color.opacity(0.1))
+        .cornerRadius(8)
+    }
+
+    // MARK: - 文件操作
 
     private func selectFile() {
         let panel = NSOpenPanel()
@@ -157,9 +460,11 @@ struct JSONImportView: View {
         }
     }
 
-    private func importJSON() {
+    // MARK: - 导入流程
+
+    /// 开始导入流程
+    private func startImport() {
         errorMessage = nil
-        importWarnings = []
 
         // 1. 检查文本编码
         guard let data = jsonText.data(using: .utf8) else {
@@ -174,93 +479,37 @@ struct JSONImportView: View {
                 return
             }
 
-            var importedCount = 0
-            var totalCount = 0
-            var skippedServers: [(name: String?, reason: String)] = []
-
-            // 格式 1: 我们自己的导出格式 {"servers": [...]}
-            if let serversArray = json["servers"] as? [[String: Any]] {
-                totalCount = serversArray.count
-
-                if totalCount == 0 {
-                    errorMessage = "servers 数组为空，没有可导入的服务器"
-                    return
-                }
-
-                for (index, serverDict) in serversArray.enumerated() {
-                    let serverName = serverDict["name"] as? String ?? "未命名 #\(index + 1)"
-
-                    if let server = parseServerDict(serverDict, skippedReason: { reason in
-                        skippedServers.append((name: serverName, reason: reason))
-                    }) {
-                        modelContext.insert(server)
-                        importedCount += 1
-                    }
-                }
-            }
-            // 格式 2: Claude Code 的 .mcp.json 格式 {"mcpServers": {...}}
-            else if let mcpServers = json["mcpServers"] as? [String: [String: Any]] {
-                totalCount = mcpServers.count
-
-                if totalCount == 0 {
-                    errorMessage = "mcpServers 对象为空，没有可导入的服务器"
-                    return
-                }
-
-                for (name, config) in mcpServers {
-                    if let server = parseMCPServerConfig(name: name, config: config, skippedReason: { reason in
-                        skippedServers.append((name: name, reason: reason))
-                    }) {
-                        modelContext.insert(server)
-                        importedCount += 1
-                    }
-                }
-            } else {
+            guard let mcpServers = json["mcpServers"] as? [String: [String: Any]] else {
                 errorMessage = """
                 不支持的 JSON 格式
 
                 支持的格式：
-                1. {"servers": [...]} - 我们的导出格式
-                2. {"mcpServers": {...}} - Claude Code .mcp.json 格式
+                {"mcpServers": {...}} - Claude Code .mcp.json 格式
 
                 当前 JSON 的顶层 key: \(json.keys.joined(separator: ", "))
                 """
                 return
             }
 
-            // 3. 生成警告信息
-            if !skippedServers.isEmpty {
-                for skipped in skippedServers {
-                    let serverInfo = skipped.name ?? "未知服务器"
-                    importWarnings.append("\(serverInfo): \(skipped.reason)")
-                }
-            }
-
-            // 4. 检查导入结果
-            if importedCount == 0 {
-                errorMessage = """
-                所有服务器配置都无法导入（共 \(totalCount) 个）
-
-                请检查上方的警告信息了解详情
-                """
+            if mcpServers.isEmpty {
+                errorMessage = "mcpServers 对象为空，没有可导入的服务器"
                 return
             }
 
-            // 5. 保存并提示结果
-            try modelContext.save()
+            // 3. 检测重复
+            let existingNames = Set(existingServers.map { $0.name })
+            let importingNames = Set(mcpServers.keys)
+            duplicateNames = Array(importingNames.intersection(existingNames)).sorted()
 
-            if importedCount < totalCount {
-                // 部分成功，显示警告后自动关闭
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    dismiss()
-                }
+            // 4. 如果有重复，显示策略选择界面
+            if !duplicateNames.isEmpty {
+                importState = .duplicateCheck
             } else {
-                // 全部成功，立即关闭
-                dismiss()
+                // 没有重复，直接导入
+                performImport()
             }
 
         } catch let error as NSError {
-            // 解析 JSON 错误的详细信息
             if error.domain == NSCocoaErrorDomain && error.code == 3840 {
                 let userInfo = error.userInfo
                 if let debugDescription = userInfo["NSDebugDescription"] as? String {
@@ -278,61 +527,87 @@ struct JSONImportView: View {
         }
     }
 
-    // 解析我们自己的格式
-    private func parseServerDict(_ dict: [String: Any], skippedReason: (String) -> Void) -> ServerConfig? {
-        // 检查必需字段: name
-        guard let name = dict["name"] as? String else {
-            skippedReason("缺少必需字段 'name'")
-            return nil
-        }
+    /// 执行实际的导入操作
+    private func performImport() {
+        importState = .importing
+        importResult = ImportResult()
 
-        // 智能推断类型：优先使用显式的 type 字段，否则根据配置内容推断
-        let type: ServerType
-        if let typeString = dict["type"] as? String {
-            if let explicitType = ServerType(rawValue: typeString) {
-                type = explicitType
-            } else {
-                skippedReason("不支持的 type 值 '\(typeString)'，仅支持 'http' 或 'stdio'")
-                return nil
+        // 异步执行导入，避免阻塞 UI
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            do {
+                guard let data = jsonText.data(using: .utf8),
+                      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let mcpServers = json["mcpServers"] as? [String: [String: Any]] else {
+                    return
+                }
+
+                let existingServersDict = Dictionary(uniqueKeysWithValues: existingServers.map { ($0.name, $0) })
+
+                for (name, config) in mcpServers {
+                    // 检查是否重复
+                    let isDuplicate = existingServersDict[name] != nil
+
+                    if isDuplicate {
+                        switch selectedStrategy {
+                        case .skip:
+                            importResult.skipped.append(name)
+                            continue
+
+                        case .replace:
+                            // 删除旧的
+                            if let oldServer = existingServersDict[name] {
+                                modelContext.delete(oldServer)
+                            }
+                            // 继续插入新的
+                            if let server = parseMCPServerConfig(name: name, config: config) {
+                                modelContext.insert(server)
+                                importResult.replaced.append(name)
+                            } else {
+                                importResult.failed.append((name: name, reason: "配置解析失败"))
+                            }
+
+                        case .rename:
+                            // 生成新名称
+                            var newName = name
+                            var suffix = 2
+                            while existingServers.contains(where: { $0.name == newName }) {
+                                newName = "\(name)-\(suffix)"
+                                suffix += 1
+                            }
+
+                            if let server = parseMCPServerConfig(name: newName, config: config) {
+                                modelContext.insert(server)
+                                importResult.added.append(newName)
+                            } else {
+                                importResult.failed.append((name: name, reason: "配置解析失败"))
+                            }
+                        }
+                    } else {
+                        // 不重复，直接添加
+                        if let server = parseMCPServerConfig(name: name, config: config) {
+                            modelContext.insert(server)
+                            importResult.added.append(name)
+                        } else {
+                            importResult.failed.append((name: name, reason: "配置解析失败"))
+                        }
+                    }
+                }
+
+                // 保存
+                try modelContext.save()
+
+                // 切换到完成状态
+                importState = .completed
+
+            } catch {
+                errorMessage = "导入失败: \(error.localizedDescription)"
+                importState = .editing
             }
-        } else if dict["command"] != nil {
-            // 有 command 字段 → stdio 类型
-            type = .stdio
-        } else if dict["url"] != nil {
-            // 有 url 字段 → http 类型
-            type = .http
-        } else {
-            // 既没有 type，也无法推断
-            skippedReason("无法推断服务器类型，请提供 'type' 字段或 'url'/'command' 字段")
-            return nil
         }
-
-        // 类型特定字段验证
-        if type == .http && dict["url"] == nil {
-            skippedReason("HTTP 类型服务器缺少 'url' 字段")
-            return nil
-        }
-
-        if type == .stdio && dict["command"] == nil {
-            skippedReason("stdio 类型服务器缺少 'command' 字段")
-            return nil
-        }
-
-        return ServerConfig(
-            name: name,
-            type: type,
-            description: dict["description"] as? String ?? "",
-            url: dict["url"] as? String,
-            headers: dict["headers"] as? [String: String] ?? [:],
-            command: dict["command"] as? String,
-            args: dict["args"] as? [String] ?? [],
-            env: dict["env"] as? [String: String] ?? [:],
-            isEnabled: dict["isEnabled"] as? Bool ?? true
-        )
     }
 
     // 解析 Claude Code 的 .mcp.json 格式
-    private func parseMCPServerConfig(name: String, config: [String: Any], skippedReason: (String) -> Void) -> ServerConfig? {
+    private func parseMCPServerConfig(name: String, config: [String: Any], skippedReason: ((String) -> Void)? = nil) -> ServerConfig? {
         // 智能推断类型：优先使用显式的 type 字段，否则根据配置内容推断
         let type: ServerType
         if let typeString = config["type"] as? String {
@@ -341,7 +616,7 @@ struct JSONImportView: View {
             } else if typeString == "stdio" {
                 type = .stdio
             } else {
-                skippedReason("不支持的 type 值 '\(typeString)'，仅支持 'http' 或 'stdio'")
+                skippedReason?("不支持的 type 值 '\(typeString)'，仅支持 'http' 或 'stdio'")
                 return nil
             }
         } else if config["command"] != nil {
@@ -352,7 +627,7 @@ struct JSONImportView: View {
             type = .http
         } else {
             // 既没有 type，也无法推断
-            skippedReason("无法推断服务器类型，请提供 'type' 字段或 'url'/'command' 字段")
+            skippedReason?("无法推断服务器类型，请提供 'type' 字段或 'url'/'command' 字段")
             return nil
         }
 
@@ -365,7 +640,7 @@ struct JSONImportView: View {
         if type == .http {
             url = config["url"] as? String
             if url == nil {
-                skippedReason("HTTP 类型服务器缺少 'url' 字段")
+                skippedReason?("HTTP 类型服务器缺少 'url' 字段")
                 return nil
             }
             command = nil
@@ -376,7 +651,7 @@ struct JSONImportView: View {
             url = nil
             command = config["command"] as? String
             if command == nil {
-                skippedReason("stdio 类型服务器缺少 'command' 字段")
+                skippedReason?("stdio 类型服务器缺少 'command' 字段")
                 return nil
             }
             args = config["args"] as? [String] ?? []

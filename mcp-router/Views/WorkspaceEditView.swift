@@ -58,11 +58,11 @@ struct WorkspaceEditView: View {
 
                 Section("配置预览") {
                     Text(MCPConfigManager.generateConfigPreview(token: token, port: serverPort))
-                        .font(.system(.caption, design: .monospaced))
+                        .font(DesignSystem.Typography.monoSmall)
                         .textSelection(.enabled)
-                        .padding(8)
-                        .background(Color(white: 0.1))
-                        .cornerRadius(8)
+                        .padding(DesignSystem.Spacing.sm)
+                        .background(DesignSystem.Colors.overlay())
+                        .cornerRadius(DesignSystem.CornerRadius.md)
                 }
             }
             .navigationTitle(workspace == nil ? "新建 Workspace" : "编辑 Workspace")

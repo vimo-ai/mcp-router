@@ -18,7 +18,7 @@ struct WorkspaceDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
                 // Header
                 headerSection
 
@@ -34,9 +34,9 @@ struct WorkspaceDetailView: View {
 
                 Spacer()
             }
-            .padding(24)
+            .padding(DesignSystem.Spacing.xl)
         }
-        .background(Color.black)
+        .background(DesignSystem.Colors.contentBackground)
         .navigationTitle(workspace.name)
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -107,16 +107,16 @@ struct WorkspaceDetailView: View {
     }
 
     private var tokenSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
             Text("Token")
-                .font(.headline)
+                .font(DesignSystem.Typography.headline)
 
             HStack {
                 Text(workspace.token)
-                    .font(.system(.body, design: .monospaced))
-                    .padding(8)
-                    .background(Color(white: 0.1))
-                    .cornerRadius(6)
+                    .font(DesignSystem.Typography.mono)
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(DesignSystem.Colors.overlay())
+                    .cornerRadius(DesignSystem.CornerRadius.sm)
 
                 Button {
                     copyToken()
@@ -129,8 +129,8 @@ struct WorkspaceDetailView: View {
             }
 
             Text("此 Token 用于 .mcp.json 配置文件中的 X-Workspace-Token Header")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
         }
     }
 

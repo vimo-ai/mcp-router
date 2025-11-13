@@ -44,17 +44,17 @@ struct ContentView: View {
     }
 
     private var emptyDetailView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: DesignSystem.Spacing.lg) {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 60))
-                .foregroundColor(.secondary)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
 
             Text("从侧边栏选择一个 Workspace")
-                .font(.title3)
-                .foregroundColor(.secondary)
+                .font(DesignSystem.Typography.title3)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(DesignSystem.Colors.contentBackground)
     }
 }
 

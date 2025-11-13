@@ -18,8 +18,8 @@ struct ServerToggleCard: View {
             // Header: 名称 + Toggle
             HStack {
                 Text(server.name)
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                 Spacer()
 
@@ -34,15 +34,15 @@ struct ServerToggleCard: View {
             // 描述
             if !server.serverDescription.isEmpty {
                 Text(server.serverDescription)
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.subheadline)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
             }
 
             // URL
             if let url = server.url {
                 Label(url, systemImage: "link")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
                     .lineLimit(1)
             }
 
@@ -50,23 +50,23 @@ struct ServerToggleCard: View {
             if !server.isEnabled {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                        .font(.caption)
+                        .foregroundColor(DesignSystem.Colors.warning)
+                        .font(DesignSystem.Typography.caption)
                     Text("Server Pool 中已禁用")
-                        .font(.caption)
-                        .foregroundColor(.orange)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.warning)
                 }
             }
 
             Spacer()
         }
-        .padding(16)
+        .padding(DesignSystem.Spacing.lg)
         .frame(minHeight: 120)
-        .background(Color(white: 0.1))
-        .cornerRadius(12)
+        .background(DesignSystem.Colors.cardBackground)
+        .cornerRadius(DesignSystem.CornerRadius.lg)
         .opacity(isEnabled ? 1.0 : 0.5)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
                 .stroke(isCustomized ? Color.blue : Color.clear, lineWidth: 2)
         )
     }
@@ -103,5 +103,5 @@ struct ServerToggleCard: View {
         )
     }
     .padding()
-    .background(Color.black)
+    .background(DesignSystem.Colors.contentBackground)
 }

@@ -36,7 +36,7 @@ struct ServersView: View {
                     .padding()
                 }
             }
-            .background(Color.black)
+            .background(DesignSystem.Colors.contentBackground)
             .navigationTitle("MCP Servers")
             .toolbar {
                 ToolbarItem(placement: .automatic) {
@@ -107,26 +107,38 @@ struct ServersView: View {
     }
 
     private func exportToJSON() {
-        let exportData: [[String: Any]] = servers.map { server in
-            var dict: [String: Any] = [
-                "name": server.name,
-                "type": server.type.rawValue,
-                "description": server.serverDescription,
-                "isEnabled": server.isEnabled
+        // 转换为 Claude Code .mcp.json 格式: {"mcpServers": {...}}
+        var mcpServers: [String: [String: Any]] = [:]
+
+        for server in servers {
+            var config: [String: Any] = [
+                "type": server.type.rawValue
             ]
 
-            if let url = server.url {
-                dict["url"] = url
+            // 根据类型添加对应字段
+            if server.type == .http {
+                if let url = server.url {
+                    config["url"] = url
+                }
+                if !server.headers.isEmpty {
+                    config["headers"] = server.headers
+                }
+            } else if server.type == .stdio {
+                if let command = server.command {
+                    config["command"] = command
+                }
+                if !server.args.isEmpty {
+                    config["args"] = server.args
+                }
+                if !server.env.isEmpty {
+                    config["env"] = server.env
+                }
             }
 
-            if !server.headers.isEmpty {
-                dict["headers"] = server.headers
-            }
-
-            return dict
+            mcpServers[server.name] = config
         }
 
-        let jsonObject = ["servers": exportData]
+        let jsonObject = ["mcpServers": mcpServers]
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
@@ -135,7 +147,7 @@ struct ServersView: View {
 
         // 保存到文件
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "mcp-servers.json"
+        panel.nameFieldStringValue = ".mcp.json"
         panel.allowedContentTypes = [.json]
 
         panel.begin { response in
@@ -158,8 +170,8 @@ struct ServerCardView: View {
             // Header: 名称 + Toggle
             HStack {
                 Text(server.name)
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                 Spacer()
 
@@ -171,15 +183,15 @@ struct ServerCardView: View {
             // 描述
             if !server.serverDescription.isEmpty {
                 Text(server.serverDescription)
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.subheadline)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
             }
 
             // URL
             if let url = server.url {
                 Label(url, systemImage: "link")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
                     .lineLimit(1)
             }
 
@@ -193,7 +205,6 @@ struct ServerCardView: View {
                     onEdit()
                 } label: {
                     Image(systemName: "pencil")
-                        .foregroundColor(.white)
                 }
                 .buttonStyle(.borderless)
 
@@ -201,15 +212,14 @@ struct ServerCardView: View {
                     onDelete()
                 } label: {
                     Image(systemName: "trash")
-                        .foregroundColor(.white)
                 }
                 .buttonStyle(.borderless)
             }
         }
-        .padding(16)
+        .padding(DesignSystem.Spacing.lg)
         .frame(minHeight: 150)
-        .background(Color(white: 0.1))
-        .cornerRadius(12)
+        .background(DesignSystem.Colors.cardBackground)
+        .cornerRadius(DesignSystem.CornerRadius.lg)
         .opacity(server.isEnabled ? 1.0 : 0.5)
     }
 }

@@ -18,8 +18,9 @@ struct SettingsView: View {
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var automaticallyChecksForUpdates = false
-    @State private var isInstalledToGlobal = false
-    @State private var isCheckingGlobalInstall = true
+    @State private var providerStates: [GlobalProviderState] = GlobalConfigProviders.all.map {
+        GlobalProviderState(provider: $0)
+    }
 
     private var settings: AppSettings {
         if let existing = settingsArray.first {
@@ -67,7 +68,7 @@ struct SettingsView: View {
             // 同步预发布版本偏好到 Sparkle
             updatePrereleasePreference(settings.allowPrereleaseUpdates)
 
-            checkGlobalInstallation()
+            checkGlobalInstallations()
         }
         .alert("提示", isPresented: $showingAlert) {
             Button("确定", role: .cancel) {}
@@ -221,53 +222,62 @@ struct SettingsView: View {
 
     private var globalConfigSection: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
-            Text("Claude 全局配置")
+            Text("客户端全局配置")
                 .font(DesignSystem.Typography.headline)
 
-            VStack(alignment: .leading, spacing: 12) {
-                if isCheckingGlobalInstall {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("检查安装状态...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    HStack(spacing: 12) {
-                        if isInstalledToGlobal {
-                            Button("打开配置文件") {
-                                openClaudeConfig()
-                            }
-                            .buttonStyle(.borderedProminent)
+            ForEach(providerStates) { state in
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+                    HStack(spacing: DesignSystem.Spacing.md) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(state.provider.displayName)
+                                .font(DesignSystem.Typography.subheadline)
+                            Text(state.provider.configPath.path)
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                        Spacer()
 
-                            Text("✓ 已安装")
-                                .font(.subheadline)
-                                .foregroundColor(.green)
-
-                            Button("卸载") {
-                                uninstallFromGlobal()
-                            }
-                            .buttonStyle(.bordered)
-                            .foregroundColor(.orange)
-                        } else {
-                            Button("安装到全局配置") {
-                                installToGlobal()
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Text("未安装")
+                        if state.isChecking || state.isProcessing {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text(state.isChecking ? "检查安装状态..." : "处理中...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
+                        } else {
+                            if state.isInstalled {
+                                Button("打开配置文件") {
+                                    openConfig(for: state.provider)
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Text("✓ 已安装")
+                                    .font(.subheadline)
+                                    .foregroundColor(.green)
+
+                                Button("卸载") {
+                                    uninstall(provider: state.provider)
+                                }
+                                .buttonStyle(.bordered)
+                                .foregroundColor(.orange)
+                            } else {
+                                Button("安装到全局配置") {
+                                    install(provider: state.provider)
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Text("未安装")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
-                }
 
-                Text("将 mcp-router 安装到 ~/.claude.json 的根配置，所有 workspace 都可使用。")
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Text(state.provider.descriptionText)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .containerStyle()
             }
-            .containerStyle()
         }
     }
 
@@ -303,78 +313,109 @@ struct SettingsView: View {
 
     // MARK: - Global Config Actions
 
-    private func checkGlobalInstallation() {
-        isCheckingGlobalInstall = true
+    private func checkGlobalInstallations() {
+        let providers = providerStates.map { $0.provider }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let installed = try ClaudeConfigManager.isInstalledToGlobal()
+        for provider in providers {
+            updateProviderState(id: provider.id) { state in
+                state.isChecking = true
+            }
 
-                DispatchQueue.main.async {
-                    self.isInstalledToGlobal = installed
-                    self.isCheckingGlobalInstall = false
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isInstalledToGlobal = false
-                    self.isCheckingGlobalInstall = false
-                    print("❌ 检查全局配置失败: \(error)")
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let installed = try provider.isInstalled()
+                    DispatchQueue.main.async {
+                        self.updateProviderState(id: provider.id) { state in
+                            state.isInstalled = installed
+                            state.isChecking = false
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.updateProviderState(id: provider.id) { state in
+                            state.isInstalled = false
+                            state.isChecking = false
+                        }
+                        print("❌ 检查 \(provider.displayName) 全局配置失败: \(error)")
+                    }
                 }
             }
         }
     }
 
-    private func installToGlobal() {
-        // 生成全局 token（固定的，用于全局配置）
-        let globalToken = "global-mcp-router-token"
+    private func install(provider: any GlobalConfigProvider) {
+        let providerID = provider.id
         let port = settings.serverPort
 
+        updateProviderState(id: providerID) { state in
+            state.isProcessing = true
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try ClaudeConfigManager.installToGlobal(token: globalToken, port: port)
-
+                try provider.install(port: port)
                 DispatchQueue.main.async {
-                    self.isInstalledToGlobal = true
-                    self.alertMessage = "✓ 已成功安装到 ~/.claude.json 的全局配置\n\n所有 workspace 现在都可以使用 mcp-router。"
+                    self.updateProviderState(id: providerID) { state in
+                        state.isInstalled = true
+                        state.isProcessing = false
+                    }
+                    self.alertMessage = "✓ 已成功安装到 \(provider.displayName) 的全局配置\n\n所有 workspace 现在都可以使用 mcp-router。"
                     self.showingAlert = true
-                    print("✅ 已安装到全局配置")
+                    print("✅ 已安装到 \(provider.displayName) 全局配置")
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.alertMessage = "安装失败: \(error.localizedDescription)\n\n请检查 ~/.claude.json 文件权限。"
+                    self.updateProviderState(id: providerID) { state in
+                        state.isProcessing = false
+                    }
+                    self.alertMessage = "安装到 \(provider.displayName) 失败: \(error.localizedDescription)"
                     self.showingAlert = true
-                    print("❌ 安装到全局配置失败: \(error)")
+                    print("❌ 安装到 \(provider.displayName) 失败: \(error)")
                 }
             }
         }
     }
 
-    private func uninstallFromGlobal() {
+    private func uninstall(provider: any GlobalConfigProvider) {
+        let providerID = provider.id
+
+        updateProviderState(id: providerID) { state in
+            state.isProcessing = true
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try ClaudeConfigManager.uninstallFromGlobal()
-
+                try provider.uninstall()
                 DispatchQueue.main.async {
-                    self.isInstalledToGlobal = false
-                    self.alertMessage = "✓ 已从全局配置中卸载"
+                    self.updateProviderState(id: providerID) { state in
+                        state.isInstalled = false
+                        state.isProcessing = false
+                    }
+                    self.alertMessage = "✓ 已从 \(provider.displayName) 全局配置中卸载"
                     self.showingAlert = true
-                    print("✅ 已从全局配置卸载")
+                    print("✅ 已从 \(provider.displayName) 全局配置卸载")
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.alertMessage = "卸载失败: \(error.localizedDescription)"
+                    self.updateProviderState(id: providerID) { state in
+                        state.isProcessing = false
+                    }
+                    self.alertMessage = "卸载 \(provider.displayName) 失败: \(error.localizedDescription)"
                     self.showingAlert = true
-                    print("❌ 卸载失败: \(error)")
+                    print("❌ 卸载 \(provider.displayName) 失败: \(error)")
                 }
             }
         }
     }
 
-    private func openClaudeConfig() {
-        let configPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude.json")
+    private func openConfig(for provider: any GlobalConfigProvider) {
+        NSWorkspace.shared.open(provider.configPath)
+    }
 
-        NSWorkspace.shared.open(configPath)
+    private func updateProviderState(id: String, mutation: (inout GlobalProviderState) -> Void) {
+        if let index = providerStates.firstIndex(where: { $0.id == id }) {
+            mutation(&providerStates[index])
+        }
     }
 
     /// 更新 Sparkle 的预发布版本偏好
@@ -411,5 +452,18 @@ struct SettingsView: View {
     return NavigationStack {
         SettingsView()
             .modelContainer(container)
+    }
+}
+
+// MARK: - Models
+
+private struct GlobalProviderState: Identifiable {
+    let provider: any GlobalConfigProvider
+    var isChecking: Bool = true
+    var isInstalled: Bool = false
+    var isProcessing: Bool = false
+
+    var id: String {
+        provider.id
     }
 }

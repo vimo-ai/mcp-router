@@ -7,19 +7,21 @@
         <link>https://github.com/vimo-ai/mcp-router</link>
 <item>
     <title>Version 0.0.2-beta.5</title>
-    <sparkle:version>4</sparkle:version>
+    <sparkle:version>5</sparkle:version>
     <sparkle:shortVersionString>0.0.2-beta.5</sparkle:shortVersionString>
     <sparkle:channel>beta</sparkle:channel>
-    <pubDate>Thu, 13 Nov 2025 05:44:04 +0000</pubDate>
+    <pubDate>Thu, 13 Nov 2025 07:24:41 +0000</pubDate>
     <description><![CDATA[
         <h2>What's New</h2>
         <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v0.0.2-beta.5">release notes</a> for details.</p>
     ]]></description>
     <enclosure
         url="https://github.com/vimo-ai/mcp-router/releases/download/v0.0.2-beta.5/mcp-router-0.0.2-beta.5.zip"
-        sparkle:edSignature="oxl64gMUiGPBlCldKzevDYMni6L8dZAQx116me0GO/+gZovMNIXYxyomcyDbct2lSFcSpJNWitxmtEERcumEDA=="
-        length="1610108"
-        type="application/octet-stream" />
+        sparkle:edSignature="JZ1IVxrQwCmQA5dMVJSbYV3+ANdjCk7Mr9krFr1ReNXX+5zPc9jBoySMPkjCKquMohgdF/zWbDzzcTdr8WxfCA=="
+        length="1612735"
+        type="application/octet-stream"
+        sparkle:version="5"
+        sparkle:shortVersionString="0.0.2-beta.5" />
     <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
 </item>
 

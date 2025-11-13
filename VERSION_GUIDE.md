@@ -132,13 +132,22 @@ git push origin vX.Y.Z[-beta.N]
 
 **原因**：`CFBundleVersion` 没有递增，或者 appcast 中的 `sparkle:version` 比当前的 `CFBundleVersion` 小。
 
-**解决**：确保每次发布时 `CURRENT_PROJECT_VERSION` 递增。
+**解决**：GitHub Actions 已自动处理 build number 递增，无需手动管理。
 
-### Q2: Beta 版本发布后，能回退到更早的稳定版吗？
+### Q2: 为什么更新时提示 "improperly signed and could not be validated"？
+
+**原因**：代码签名问题。Sparkle 要求更新包必须有代码签名（即使是 adhoc 签名）。
+
+**解决**：
+- GitHub Actions workflow 已配置正确的 adhoc 签名
+- 不要使用 `CODE_SIGNING_REQUIRED=NO` 和 `CODE_SIGNING_ALLOWED=NO`
+- 构建后会自动执行 `codesign --sign -` 进行 adhoc 签名
+
+### Q3: Beta 版本发布后，能回退到更早的稳定版吗？
 
 **不能**。一旦发布了 build 5 的 beta 版，下一个稳定版的 build 必须 ≥ 6。
 
-### Q3: 如何测试本地更新？
+### Q4: 如何测试本地更新？
 
 参考 `test-local-update.sh` 脚本：
 1. 启动本地 HTTP 服务器

@@ -28,18 +28,19 @@ jobs:
       - name: Get latest build number and increment
         id: build_number
         run: |
-          # 尝试从 GitHub Pages 获取 appcast.xml
+          # 从 appcast.xml 获取最新的 build number
           APPCAST_URL="https://vimo-ai.github.io/mcp-router/appcast.xml"
           LATEST_BUILD=$(curl -s "$APPCAST_URL" | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | head -1 | sed 's/<[^>]*>//g' || echo "0")
 
-          # 如果是非数字或为空，默认为 0
+          # 验证是否为纯数字
           if ! [[ "$LATEST_BUILD" =~ ^[0-9]+$ ]]; then
+            echo "⚠️  无法从 appcast.xml 获取有效的 build number，使用 0"
             LATEST_BUILD=0
           fi
 
           NEW_BUILD=$((LATEST_BUILD + 1))
           echo "BUILD_NUMBER=$NEW_BUILD" >> $GITHUB_OUTPUT
-          echo "Latest build: $LATEST_BUILD, New build: $NEW_BUILD"
+          echo "📦 Latest build: $LATEST_BUILD, New build: $NEW_BUILD"
 
       - name: Build App
         run: |
@@ -51,16 +52,22 @@ jobs:
                      CURRENT_PROJECT_VERSION=${{ steps.build_number.outputs.BUILD_NUMBER }} \
                      MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
                      CODE_SIGN_IDENTITY="-" \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGNING_ALLOWED=NO \
                      archive
 
-          # 直接从 xcarchive 复制 App
+          # 复制 App 并进行 adhoc 签名
           cp -R build/mcp-router.xcarchive/Products/Applications/mcp-router.app build/
 
           # 验证版本号
           echo "Verifying build version..."
           plutil -p build/mcp-router.app/Contents/Info.plist | grep -E "CFBundleVersion|CFBundleShortVersionString"
+
+          # 确保 adhoc 签名
+          echo "🔏 正在进行 adhoc 签名..."
+          codesign --sign - --force --deep --timestamp build/mcp-router.app
+
+          # 验证签名
+          echo "✅ 验证签名结果:"
+          codesign --verify --deep --strict --verbose=2 build/mcp-router.app
 
       - name: Create ZIP
         run: |
@@ -92,31 +99,37 @@ jobs:
 
       - name: Update appcast.xml
         run: |
-          # 检测是否为 beta 版本
+          # 自动检测是否为 beta 版本
           VERSION="${{ steps.version.outputs.VERSION }}"
+          BUILD_NUMBER="${{ steps.build_number.outputs.BUILD_NUMBER }}"
           CHANNEL=""
+
           if [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"rc"* ]]; then
             CHANNEL='<sparkle:channel>beta</sparkle:channel>'
-            echo "Detected beta/prerelease version, adding beta channel tag"
+            echo "🚧 检测到预发布版本，添加 beta channel"
+          else
+            echo "✅ 稳定版本，使用 default channel"
           fi
 
           # 创建新的 item
           cat > new_item.xml <<EOF
           <item>
-              <title>Version ${{ steps.version.outputs.VERSION }}</title>
-              <sparkle:version>${{ steps.build_number.outputs.BUILD_NUMBER }}</sparkle:version>
-              <sparkle:shortVersionString>${{ steps.version.outputs.VERSION }}</sparkle:shortVersionString>
+              <title>Version $VERSION</title>
+              <sparkle:version>$BUILD_NUMBER</sparkle:version>
+              <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
               $CHANNEL
               <pubDate>$(date -R)</pubDate>
               <description><![CDATA[
                   <h2>What's New</h2>
-                  <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v${{ steps.version.outputs.VERSION }}">release notes</a> for details.</p>
+                  <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v$VERSION">release notes</a> for details.</p>
               ]]></description>
               <enclosure
-                  url="https://github.com/vimo-ai/mcp-router/releases/download/v${{ steps.version.outputs.VERSION }}/mcp-router-${{ steps.version.outputs.VERSION }}.zip"
+                  url="https://github.com/vimo-ai/mcp-router/releases/download/v$VERSION/mcp-router-$VERSION.zip"
                   sparkle:edSignature="${{ env.SIGNATURE }}"
                   length="${{ steps.zip_size.outputs.SIZE }}"
-                  type="application/octet-stream" />
+                  type="application/octet-stream"
+                  sparkle:version="$BUILD_NUMBER"
+                  sparkle:shortVersionString="$VERSION" />
               <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
           </item>
           EOF

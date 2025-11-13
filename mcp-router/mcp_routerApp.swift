@@ -195,6 +195,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         appSettings = AppSettings.getOrCreate(context: context)
 
         print("✅ 应用设置已加载，端口: \(appSettings?.serverPort ?? 19104)")
+
+        // 应用保存的主题设置
+        applyTheme(appSettings?.appTheme ?? .auto)
+    }
+
+    /// 应用主题到整个应用
+    /// 使用应用级设置而不是窗口级设置，确保主题在窗口焦点切换时保持稳定
+    private func applyTheme(_ theme: AppTheme) {
+        NSApp.appearance = theme.appearance
+        print("🎨 主题已应用: \(theme.rawValue)")
     }
 
     func initializeDefaultServers() {

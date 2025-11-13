@@ -30,7 +30,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
                 // Header
                 headerSection
 
@@ -38,6 +38,11 @@ struct SettingsView: View {
 
                 // 服务器设置
                 serverSection
+
+                Divider()
+
+                // 外观设置
+                appearanceSection
 
                 Divider()
 
@@ -51,9 +56,9 @@ struct SettingsView: View {
 
                 Spacer()
             }
-            .padding(24)
+            .padding(DesignSystem.Spacing.xl)
         }
-        .background(Color.black)
+        .background(DesignSystem.Colors.contentBackground)
         .navigationTitle("设置")
         .onAppear {
             portInput = String(settings.serverPort)
@@ -72,34 +77,74 @@ struct SettingsView: View {
     }
 
     private var headerSection: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: DesignSystem.Spacing.lg) {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 48))
-                .foregroundColor(.gray)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
                 Text("应用设置")
-                    .font(.title)
+                    .font(DesignSystem.Typography.title)
                     .fontWeight(.bold)
 
                 Text("配置 MCP Router 的运行参数")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
             }
         }
     }
 
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+            Text("外观")
+                .font(DesignSystem.Typography.headline)
+
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+                Text("主题")
+                    .font(DesignSystem.Typography.subheadline)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Picker("主题", selection: Binding(
+                    get: { settings.appTheme },
+                    set: { newTheme in
+                        settings.appTheme = newTheme
+                        settings.updatedAt = Date()
+                        try? modelContext.save()
+                        applyTheme(newTheme)
+                    }
+                )) {
+                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                        Image(systemName: theme.icon)
+                            .tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                // 显示当前主题文字说明
+                Text("当前: \(settings.appTheme.rawValue)")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Text("选择应用的显示主题,跟随系统将自动适配明暗模式")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+            .containerStyle()
+        }
+    }
+
     private var serverSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
             Text("HTTP 服务器")
-                .font(.headline)
+                .font(DesignSystem.Typography.headline)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
                 Text("服务器端口")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .font(DesignSystem.Typography.subheadline)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
 
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSystem.Spacing.md) {
                     TextField("端口号", text: $portInput)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 120)
@@ -118,24 +163,22 @@ struct SettingsView: View {
                     .disabled(portInput == String(settings.serverPort))
 
                     Text("当前: \(settings.serverPort)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
                 }
 
                 Text("端口范围: 1024-65535。修改后需要重启服务器。")
-                    .font(.caption)
-                    .foregroundColor(.orange)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.warning)
             }
-            .padding(16)
-            .background(Color(white: 0.05))
-            .cornerRadius(12)
+            .containerStyle()
         }
     }
 
     private var updateSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
             Text("自动更新")
-                .font(.headline)
+                .font(DesignSystem.Typography.headline)
 
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("自动检查更新", isOn: $automaticallyChecksForUpdates)
@@ -169,19 +212,17 @@ struct SettingsView: View {
                 .buttonStyle(.borderedProminent)
 
                 Text("应用会定期检查更新并在后台下载。支持增量更新以节省带宽。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
             }
-            .padding(16)
-            .background(Color(white: 0.05))
-            .cornerRadius(12)
+            .containerStyle()
         }
     }
 
     private var globalConfigSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
             Text("Claude 全局配置")
-                .font(.headline)
+                .font(DesignSystem.Typography.headline)
 
             VStack(alignment: .leading, spacing: 12) {
                 if isCheckingGlobalInstall {
@@ -223,12 +264,10 @@ struct SettingsView: View {
                 }
 
                 Text("将 mcp-router 安装到 ~/.claude.json 的根配置，所有 workspace 都可使用。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
             }
-            .padding(16)
-            .background(Color(white: 0.05))
-            .cornerRadius(12)
+            .containerStyle()
         }
     }
 
@@ -348,6 +387,13 @@ struct SettingsView: View {
         UserDefaults.standard.synchronize()
 
         print(allowed ? "✅ 已开启预发布版本更新（Beta/RC）" : "📦 已关闭预发布版本更新（仅正式版）")
+    }
+
+    /// 应用主题到整个应用
+    /// 使用应用级设置而不是窗口级设置，避免焦点切换时主题被重置
+    private func applyTheme(_ theme: AppTheme) {
+        NSApp.appearance = theme.appearance
+        print("🎨 主题已切换为: \(theme.rawValue)")
     }
 }
 

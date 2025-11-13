@@ -38,7 +38,7 @@ struct WorkspacesView: View {
                     dragOverlay
                 }
             }
-            .background(Color.black)
+            .background(DesignSystem.Colors.contentBackground)
             .navigationTitle("Workspaces")
             .toolbar {
                 ToolbarItem(placement: .automatic) {
@@ -253,8 +253,8 @@ struct WorkspaceCardView: View {
                 }
 
                 Text(workspace.name)
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                 Spacer()
             }
@@ -262,18 +262,18 @@ struct WorkspaceCardView: View {
             // Token
             HStack {
                 Text("Token:")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
 
                 Text(workspace.token)
-                    .font(.caption.monospaced())
+                    .font(DesignSystem.Typography.monoSmall)
                     .foregroundColor(.blue)
 
                 Button {
                     copyToken()
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.caption)
+                        .font(DesignSystem.Typography.caption)
                 }
                 .buttonStyle(.borderless)
             }
@@ -281,8 +281,8 @@ struct WorkspaceCardView: View {
             // 项目路径
             if let path = workspace.projectPath {
                 Label(path, systemImage: "folder")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
                     .lineLimit(1)
             }
 
@@ -291,12 +291,12 @@ struct WorkspaceCardView: View {
                 let customizedCount = workspace.serverOverrides.count
                 if customizedCount > 0 {
                     Text("\(customizedCount) 项自定义")
-                        .font(.caption)
+                        .font(DesignSystem.Typography.caption)
                         .foregroundColor(.blue)
                 } else {
                     Text("跟随默认")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
                 }
             }
 
@@ -311,7 +311,6 @@ struct WorkspaceCardView: View {
                         onEdit()
                     } label: {
                         Image(systemName: "pencil")
-                            .foregroundColor(.white)
                     }
                     .buttonStyle(.borderless)
 
@@ -319,16 +318,15 @@ struct WorkspaceCardView: View {
                         onDelete()
                     } label: {
                         Image(systemName: "trash")
-                            .foregroundColor(.white)
                     }
                     .buttonStyle(.borderless)
                 }
             }
         }
-        .padding(16)
+        .padding(DesignSystem.Spacing.lg)
         .frame(minHeight: 150)
-        .background(workspace.isDefault ? Color.blue.opacity(0.1) : Color(white: 0.1))
-        .cornerRadius(12)
+        .background(workspace.isDefault ? Color.blue.opacity(0.1) : DesignSystem.Colors.cardBackground)
+        .cornerRadius(DesignSystem.CornerRadius.lg)
     }
 
     private func copyToken() {

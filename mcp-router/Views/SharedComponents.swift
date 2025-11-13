@@ -14,10 +14,10 @@ struct InfoRow: View {
     var body: some View {
         HStack {
             Text(title)
-                .foregroundColor(.secondary)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
             Spacer()
             Text(value)
-                .font(.system(.body, design: .monospaced))
+                .font(DesignSystem.Typography.mono)
                 .fontWeight(.medium)
         }
     }
@@ -29,10 +29,10 @@ struct CodeBlockView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             Text(code)
-                .font(.system(.caption, design: .monospaced))
-                .padding(8)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(6)
+                .font(DesignSystem.Typography.monoSmall)
+                .padding(DesignSystem.Spacing.sm)
+                .background(DesignSystem.Colors.overlay())
+                .cornerRadius(DesignSystem.CornerRadius.sm)
         }
     }
 }

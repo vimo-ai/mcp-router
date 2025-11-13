@@ -147,9 +147,9 @@ struct JSONImportView: View {
                         .foregroundColor(.red)
                         .font(.caption)
                 }
-                .padding(8)
-                .background(Color.red.opacity(0.1))
-                .cornerRadius(6)
+                .padding(DesignSystem.Spacing.sm)
+                .background(DesignSystem.Colors.error.opacity(0.1))
+                .cornerRadius(DesignSystem.CornerRadius.sm)
             }
 
             HStack {
@@ -219,8 +219,8 @@ struct JSONImportView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
-                .background(Color.orange.opacity(0.1))
-                .cornerRadius(8)
+                .background(DesignSystem.Colors.warning.opacity(0.1))
+                .cornerRadius(DesignSystem.CornerRadius.md)
             }
             .frame(maxHeight: 150)
 
@@ -259,10 +259,10 @@ struct JSONImportView: View {
                         }
                         .padding()
                         .background(selectedStrategy == strategy ? Color.blue.opacity(0.1) : Color.clear)
-                        .cornerRadius(8)
+                        .cornerRadius(DesignSystem.CornerRadius.md)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedStrategy == strategy ? Color.blue : Color.gray.opacity(0.3), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .stroke(selectedStrategy == strategy ? Color.blue : DesignSystem.Colors.separator, lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -348,8 +348,8 @@ struct JSONImportView: View {
                     }
                 }
                 .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+                .background(DesignSystem.Colors.overlay())
+                .cornerRadius(DesignSystem.CornerRadius.lg)
 
                 // 详细列表
                 VStack(alignment: .leading, spacing: 16) {
@@ -395,8 +395,8 @@ struct JSONImportView: View {
                             }
                         }
                         .padding()
-                        .background(Color.red.opacity(0.1))
-                        .cornerRadius(8)
+                        .background(DesignSystem.Colors.error.opacity(0.1))
+                        .cornerRadius(DesignSystem.CornerRadius.md)
                     }
                 }
 
@@ -427,7 +427,7 @@ struct JSONImportView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(color.opacity(0.1))
-        .cornerRadius(8)
+        .cornerRadius(DesignSystem.CornerRadius.md)
     }
 
     // MARK: - 文件操作

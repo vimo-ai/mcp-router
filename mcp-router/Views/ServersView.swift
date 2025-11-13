@@ -36,7 +36,7 @@ struct ServersView: View {
                     .padding()
                 }
             }
-            .background(Color.black)
+            .background(DesignSystem.Colors.contentBackground)
             .navigationTitle("MCP Servers")
             .toolbar {
                 ToolbarItem(placement: .automatic) {
@@ -170,8 +170,8 @@ struct ServerCardView: View {
             // Header: 名称 + Toggle
             HStack {
                 Text(server.name)
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                 Spacer()
 
@@ -183,15 +183,15 @@ struct ServerCardView: View {
             // 描述
             if !server.serverDescription.isEmpty {
                 Text(server.serverDescription)
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.subheadline)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
             }
 
             // URL
             if let url = server.url {
                 Label(url, systemImage: "link")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
                     .lineLimit(1)
             }
 
@@ -205,7 +205,6 @@ struct ServerCardView: View {
                     onEdit()
                 } label: {
                     Image(systemName: "pencil")
-                        .foregroundColor(.white)
                 }
                 .buttonStyle(.borderless)
 
@@ -213,15 +212,14 @@ struct ServerCardView: View {
                     onDelete()
                 } label: {
                     Image(systemName: "trash")
-                        .foregroundColor(.white)
                 }
                 .buttonStyle(.borderless)
             }
         }
-        .padding(16)
+        .padding(DesignSystem.Spacing.lg)
         .frame(minHeight: 150)
-        .background(Color(white: 0.1))
-        .cornerRadius(12)
+        .background(DesignSystem.Colors.cardBackground)
+        .cornerRadius(DesignSystem.CornerRadius.lg)
         .opacity(server.isEnabled ? 1.0 : 0.5)
     }
 }

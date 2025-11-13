@@ -107,26 +107,38 @@ struct ServersView: View {
     }
 
     private func exportToJSON() {
-        let exportData: [[String: Any]] = servers.map { server in
-            var dict: [String: Any] = [
-                "name": server.name,
-                "type": server.type.rawValue,
-                "description": server.serverDescription,
-                "isEnabled": server.isEnabled
+        // 转换为 Claude Code .mcp.json 格式: {"mcpServers": {...}}
+        var mcpServers: [String: [String: Any]] = [:]
+
+        for server in servers {
+            var config: [String: Any] = [
+                "type": server.type.rawValue
             ]
 
-            if let url = server.url {
-                dict["url"] = url
+            // 根据类型添加对应字段
+            if server.type == .http {
+                if let url = server.url {
+                    config["url"] = url
+                }
+                if !server.headers.isEmpty {
+                    config["headers"] = server.headers
+                }
+            } else if server.type == .stdio {
+                if let command = server.command {
+                    config["command"] = command
+                }
+                if !server.args.isEmpty {
+                    config["args"] = server.args
+                }
+                if !server.env.isEmpty {
+                    config["env"] = server.env
+                }
             }
 
-            if !server.headers.isEmpty {
-                dict["headers"] = server.headers
-            }
-
-            return dict
+            mcpServers[server.name] = config
         }
 
-        let jsonObject = ["servers": exportData]
+        let jsonObject = ["mcpServers": mcpServers]
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
@@ -135,7 +147,7 @@ struct ServersView: View {
 
         // 保存到文件
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "mcp-servers.json"
+        panel.nameFieldStringValue = ".mcp.json"
         panel.allowedContentTypes = [.json]
 
         panel.begin { response in

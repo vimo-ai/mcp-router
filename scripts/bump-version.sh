@@ -2,6 +2,9 @@
 
 # 版本号自动更新脚本
 # 自动更新 Xcode 项目版本号、创建 commit 和 git tag
+#
+# 注意：Build number (CURRENT_PROJECT_VERSION) 由 GitHub Actions 自动管理，无需手动更新
+#
 # 使用方法:
 #   ./scripts/bump-version.sh 0.0.3           # 正式版
 #   ./scripts/bump-version.sh 0.0.3-beta.1    # 预发布版
@@ -24,12 +27,10 @@ if [ -z "$1" ]; then
   echo "使用方法:"
   echo "  ./scripts/bump-version.sh 0.0.3           # 正式版"
   echo "  ./scripts/bump-version.sh 0.0.3-beta.1    # 预发布版"
-  echo "  ./scripts/bump-version.sh 0.0.3 2         # 指定 Build 号（可选）"
   exit 1
 fi
 
 NEW_VERSION=$1
-NEW_BUILD=${2:-}
 
 # 验证版本号格式（支持 semver 和 prerelease）
 if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
@@ -48,22 +49,12 @@ fi
 
 # 获取当前版本号
 CURRENT_VERSION=$(grep -m 1 'MARKETING_VERSION = ' "$PROJECT_FILE" | sed 's/.*= "\(.*\)";/\1/')
-CURRENT_BUILD=$(grep -m 1 'CURRENT_PROJECT_VERSION = ' "$PROJECT_FILE" | sed 's/.*= \(.*\);/\1/')
 
-echo -e "${BLUE}📊 当前版本信息${NC}"
-echo "  版本号: $CURRENT_VERSION"
-echo "  Build:  $CURRENT_BUILD"
+echo -e "${BLUE}📊 版本信息${NC}"
+echo "  当前版本: $CURRENT_VERSION"
+echo "  新版本:   $NEW_VERSION"
 echo ""
-
-# 自动递增 Build 号（如果未指定）
-if [ -z "$NEW_BUILD" ]; then
-  NEW_BUILD=$((CURRENT_BUILD + 1))
-  echo -e "${GREEN}🔢 自动递增 Build 号: $CURRENT_BUILD → $NEW_BUILD${NC}"
-fi
-
-echo -e "${BLUE}🎯 新版本信息${NC}"
-echo "  版本号: $CURRENT_VERSION → $NEW_VERSION"
-echo "  Build:  $CURRENT_BUILD → $NEW_BUILD"
+echo -e "${YELLOW}💡 Build number 将由 GitHub Actions 自动管理${NC}"
 echo ""
 
 # 询问确认
@@ -75,13 +66,11 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # 更新版本号
-echo -e "${GREEN}📝 更新 project.pbxproj...${NC}"
+echo -e "${GREEN}📝 更新 MARKETING_VERSION...${NC}"
 sed -i '' "s/MARKETING_VERSION = \"$CURRENT_VERSION\"/MARKETING_VERSION = \"$NEW_VERSION\"/g" "$PROJECT_FILE"
-sed -i '' "s/CURRENT_PROJECT_VERSION = $CURRENT_BUILD/CURRENT_PROJECT_VERSION = $NEW_BUILD/g" "$PROJECT_FILE"
 
 # 验证更新
 UPDATED_COUNT=$(grep -c "MARKETING_VERSION = \"$NEW_VERSION\"" "$PROJECT_FILE")
-BUILD_COUNT=$(grep -c "CURRENT_PROJECT_VERSION = $NEW_BUILD" "$PROJECT_FILE")
 
 if [ "$UPDATED_COUNT" -ne 6 ]; then
   echo -e "${RED}❌ 版本号更新异常（预期 6 处，实际 $UPDATED_COUNT 处）${NC}"
@@ -89,13 +78,7 @@ if [ "$UPDATED_COUNT" -ne 6 ]; then
   exit 1
 fi
 
-if [ "$BUILD_COUNT" -ne 6 ]; then
-  echo -e "${RED}❌ Build 号更新异常（预期 6 处，实际 $BUILD_COUNT 处）${NC}"
-  git checkout "$PROJECT_FILE"
-  exit 1
-fi
-
-echo -e "${GREEN}✅ 版本号已更新（6 处）${NC}"
+echo -e "${GREEN}✅ MARKETING_VERSION 已更新（6 处）${NC}"
 
 # 创建 Git commit
 echo -e "${GREEN}📦 创建 Git commit...${NC}"
@@ -103,7 +86,7 @@ git add "$PROJECT_FILE"
 git commit -m "🔖 Bump version to $NEW_VERSION
 
 - Update MARKETING_VERSION to $NEW_VERSION
-- Update CURRENT_PROJECT_VERSION to $NEW_BUILD
+- Build number will be auto-incremented by CI
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -121,7 +104,7 @@ if [[ "$NEW_VERSION" =~ - ]]; then
 
 This is a pre-release version for testing purposes.
 
-Build: $NEW_BUILD
+Build number will be auto-incremented by GitHub Actions.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -129,7 +112,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 else
   TAG_MESSAGE="Release v$NEW_VERSION
 
-Build: $NEW_BUILD
+Build number will be auto-incremented by GitHub Actions.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 

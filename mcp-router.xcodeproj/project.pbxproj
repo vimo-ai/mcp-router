@@ -436,7 +436,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = "0.0.2-beta.6";
+				MARKETING_VERSION = "0.0.2-beta.7";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-router";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -485,7 +485,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = "0.0.2-beta.6";
+				MARKETING_VERSION = "0.0.2-beta.7";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-router";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -514,7 +514,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = "0.0.2-beta.6";
+				MARKETING_VERSION = "0.0.2-beta.7";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -536,7 +536,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = "0.0.2-beta.6";
+				MARKETING_VERSION = "0.0.2-beta.7";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -556,7 +556,7 @@
 				DEVELOPMENT_TEAM = K7T2J28754;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
-				MARKETING_VERSION = "0.0.2-beta.6";
+				MARKETING_VERSION = "0.0.2-beta.7";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -576,7 +576,7 @@
 				DEVELOPMENT_TEAM = K7T2J28754;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "mcp-router/Info.plist";
-				MARKETING_VERSION = "0.0.2-beta.6";
+				MARKETING_VERSION = "0.0.2-beta.7";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-routerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;

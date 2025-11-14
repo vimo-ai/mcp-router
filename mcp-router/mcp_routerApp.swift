@@ -21,10 +21,68 @@ struct mcp_routerApp: App {
             Workspace.self,
             AppSettings.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
+        // 指定专属的数据库路径，避免和其他 App 冲突
+        let appSupportURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+
+        let storeURL = appSupportURL.appendingPathComponent("mcp-router.store")
+
+        // 确保目录存在
+        try? FileManager.default.createDirectory(
+            at: appSupportURL,
+            withIntermediateDirectories: true
+        )
+
+        // 迁移旧数据：如果新数据库不存在，但旧的 default.store 存在，则复制过来
+        let oldStoreURL = appSupportURL.appendingPathComponent("default.store")
+        if !FileManager.default.fileExists(atPath: storeURL.path) &&
+           FileManager.default.fileExists(atPath: oldStoreURL.path) {
+            print("🔄 检测到旧数据库，开始迁移...")
+            print("   旧路径: \(oldStoreURL.path)")
+            print("   新路径: \(storeURL.path)")
+
+            do {
+                // 复制主数据库文件
+                try FileManager.default.copyItem(at: oldStoreURL, to: storeURL)
+                print("   ✅ 主数据库文件复制成功")
+
+                // 复制 WAL 文件（如果存在）
+                let oldWAL = appSupportURL.appendingPathComponent("default.store-wal")
+                let newWAL = appSupportURL.appendingPathComponent("mcp-router.store-wal")
+                if FileManager.default.fileExists(atPath: oldWAL.path) {
+                    try? FileManager.default.copyItem(at: oldWAL, to: newWAL)
+                    print("   ✅ WAL 文件复制成功")
+                }
+
+                // 复制 SHM 文件（如果存在）
+                let oldSHM = appSupportURL.appendingPathComponent("default.store-shm")
+                let newSHM = appSupportURL.appendingPathComponent("mcp-router.store-shm")
+                if FileManager.default.fileExists(atPath: oldSHM.path) {
+                    try? FileManager.default.copyItem(at: oldSHM, to: newSHM)
+                    print("   ✅ SHM 文件复制成功")
+                }
+
+                print("✅ 数据迁移完成")
+            } catch {
+                print("❌ 数据迁移失败: \(error.localizedDescription)")
+                print("   应用将创建新的空数据库")
+                // 不抛出错误，让应用继续运行（会创建新的空数据库）
+            }
+        }
+
+        let modelConfiguration = ModelConfiguration(
+            url: storeURL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            print("✅ SwiftData 数据库路径: \(storeURL.path)")
+            return container
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
@@ -292,6 +350,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         do {
             let enabledServers = try context.fetch(descriptor)
             print("✅ 从 SwiftData 加载了 \(enabledServers.count) 个已启用的 Servers")
+
+            // 如果没有加载到任何 Server，提示用户可能需要导入配置
+            if enabledServers.isEmpty {
+                print("⚠️ 未找到任何启用的 Server 配置")
+                print("   如果您是从旧版本升级，可能需要：")
+                print("   1. 检查数据迁移是否成功（查看上方日志）")
+                print("   2. 或通过设置界面的「导入配置」功能恢复数据")
+            }
+
             return enabledServers
         } catch {
             print("❌ 加载 Servers 失败: \(error)")

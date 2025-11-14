@@ -12,8 +12,38 @@
     <sparkle:channel>beta</sparkle:channel>
     <pubDate>Fri, 14 Nov 2025 21:47:21 +0000</pubDate>
     <description><![CDATA[
-        <h2>What's New</h2>
-        <p>Check the <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v0.0.2-beta.7">release notes</a> for details.</p>
+        <h2>📋 What's New</h2>
+        <p>View full <a href="https://github.com/vimo-ai/mcp-router/releases/tag/v0.0.2-beta.7">release notes</a>.</p>
+
+        <h3>⚠️ Important Notice</h3>
+        <p><strong>This version optimizes database storage.</strong> Your configuration will be migrated automatically.</p>
+        <p><strong style="color: #ff6b6b;">⚡️ HIGHLY RECOMMENDED: Export your configuration backup before updating!</strong></p>
+        <ol>
+            <li>Open Settings → Export Configuration</li>
+            <li>Save backup file</li>
+            <li>Then proceed with update</li>
+        </ol>
+        <p>If configuration is lost after update:</p>
+        <ul>
+            <li>Check Console.app logs for migration status</li>
+            <li>Use Settings → Import Configuration to restore</li>
+        </ul>
+
+        <hr/>
+
+        <h3>⚠️ 重要提示</h3>
+        <p><strong>本版本优化了数据存储方式。</strong>您的配置会自动迁移。</p>
+        <p><strong style="color: #ff6b6b;">⚡️ 强烈建议：升级前请先导出配置备份！</strong></p>
+        <ol>
+            <li>打开设置 → 导出配置</li>
+            <li>保存备份文件</li>
+            <li>然后再升级</li>
+        </ol>
+        <p>如果升级后配置丢失：</p>
+        <ul>
+            <li>查看控制台日志检查迁移状态</li>
+            <li>通过设置 → 导入配置恢复数据</li>
+        </ul>
     ]]></description>
     <enclosure
         url="https://github.com/vimo-ai/mcp-router/releases/download/v0.0.2-beta.7/mcp-router-0.0.2-beta.7.zip"

@@ -96,13 +96,13 @@ final class MCPRouter: ObservableObject {
             MCPTool(
                 name: "mcp_router__list_servers",
                 description: """
-                📋 列出所有可用的 MCP Servers
+                📋 List all available MCP Servers
 
-                已加载的 Servers:
+                Loaded servers:
                 \(serverSummary)
 
-                返回 Server 列表(不含工具详情,节省 tokens)。
-                使用 mcp_router__list_tools 查看某个 Server 的工具列表。
+                Returns server list (without tool details to save tokens).
+                Use mcp_router__list_tools to view tools for a specific server.
                 """,
                 inputSchema: [
                     "type": AnyCodable("object"),
@@ -112,20 +112,20 @@ final class MCPRouter: ObservableObject {
             MCPTool(
                 name: "mcp_router__list_tools",
                 description: """
-                🔧 列出指定 Server 的所有工具
+                🔧 List all tools for a specific server
 
-                参数:
-                - server: Server 名称(必填)
+                Parameters:
+                - server: Server name (required)
 
-                返回工具名称和描述列表。
-                使用 mcp_router__describe 查看工具的详细参数。
+                Returns tool names and descriptions.
+                Use mcp_router__describe to view detailed parameters.
                 """,
                 inputSchema: [
                     "type": AnyCodable("object"),
                     "properties": AnyCodable([
                         "server": [
                             "type": "string",
-                            "description": "Server 名称"
+                            "description": "Server name"
                         ] as [String: Any]
                     ]),
                     "required": AnyCodable(["server"])
@@ -134,17 +134,17 @@ final class MCPRouter: ObservableObject {
             MCPTool(
                 name: "mcp_router__describe",
                 description: """
-                📖 获取指定工具的详细参数说明
+                📖 Get detailed parameter description for a tool
 
-                参数: { "tool": "server_name/tool_name" }
-                示例: { "tool": "context7/resolve-library-id" }
+                Parameters: { "tool": "server_name/tool_name" }
+                Example: { "tool": "context7/resolve-library-id" }
                 """,
                 inputSchema: [
                     "type": AnyCodable("object"),
                     "properties": AnyCodable([
                         "tool": [
                             "type": "string",
-                            "description": "工具路径，格式: server_name/tool_name"
+                            "description": "Tool path, format: server_name/tool_name"
                         ] as [String: Any]
                     ]),
                     "required": AnyCodable(["tool"])
@@ -153,25 +153,25 @@ final class MCPRouter: ObservableObject {
             MCPTool(
                 name: "mcp_router__call",
                 description: """
-                🚀 调用后端 MCP 工具的统一入口
+                🚀 Unified entry point for calling backend MCP tools
 
-                ⚠️ 重要：调用前必须先用 mcp_router__describe 查看工具的参数 schema！
+                ⚠️ IMPORTANT: Always use mcp_router__describe to check the parameter schema before calling!
 
-                正确使用流程:
-                1. mcp_router__list → 查看有哪些 server 和工具
-                2. mcp_router__describe → 查看目标工具的参数定义
-                3. mcp_router__call → 根据 schema 传入正确的参数
+                Correct workflow:
+                1. mcp_router__list → See available servers and tools
+                2. mcp_router__describe → Check parameter definition for target tool
+                3. mcp_router__call → Call with correct parameters based on schema
 
-                参数格式:
+                Parameter format:
                 {
                   "tool": "server_name/tool_name",
-                  "arguments": { ...根据 describe 返回的 schema 填写... }
+                  "arguments": { ...fill based on schema from describe... }
                 }
 
-                示例:
+                Example:
                 {
                   "tool": "context7/resolve-library-id",
-                  "arguments": { ...先 describe 查看需要什么参数... }
+                  "arguments": { ...first use describe to check required parameters... }
                 }
                 """,
                 inputSchema: [
@@ -179,11 +179,11 @@ final class MCPRouter: ObservableObject {
                     "properties": AnyCodable([
                         "tool": [
                             "type": "string",
-                            "description": "工具路径，格式: server_name/tool_name"
+                            "description": "Tool path, format: server_name/tool_name"
                         ] as [String: Any],
                         "arguments": [
                             "type": "object",
-                            "description": "传递给工具的参数（必须先用 mcp_router__describe 查看该工具的参数定义）"
+                            "description": "Arguments to pass to the tool (must check parameter definition with mcp_router__describe first)"
                         ] as [String: Any]
                     ] as [String: [String: Any]]),
                     "required": AnyCodable(["tool", "arguments"])
@@ -363,12 +363,13 @@ final class MCPRouter: ObservableObject {
             // 尝试调用工具,捕获参数错误并返回友好提示
             do {
                 // 根据类型调用
+                let result: AnyCodable
                 if config.type == .http {
                     // HTTP 类型
                     guard let client = servers[serverName] else {
                         throw MCPError.toolNotFound("Server '\(serverName)' not found")
                     }
-                    return try await client.callTool(name: toolName, arguments: convertedArgs)
+                    result = try await client.callTool(name: toolName, arguments: convertedArgs)
                 } else {
                     // stdio 类型
                     let workspaceToken = workspace?.token ?? "default"
@@ -376,11 +377,33 @@ final class MCPRouter: ObservableObject {
                         workspaceToken: workspaceToken,
                         config: config
                     )
-                    return try await stdioClient.callTool(name: toolName, arguments: convertedArgs)
+                    result = try await stdioClient.callTool(name: toolName, arguments: convertedArgs)
                 }
+
+                // 检查返回结果是否包含参数错误(某些 MCP server 会在 result 中返回错误文本)
+                if let resultDict = result.value as? [String: Any],
+                   let content = resultDict["content"] as? [[String: Any]],
+                   let firstContent = content.first,
+                   let text = firstContent["text"] as? String {
+                    // 检查是否为参数验证错误
+                    let lowerText = text.lowercased()
+                    if lowerText.contains("mcp error -32602") ||
+                       (lowerText.contains("input validation error") && lowerText.contains("invalid arguments")) {
+                        // 这是参数错误,创建一个 MCPError 并格式化
+                        let error = MCPError.rpcError(-32602, text)
+                        return await formatToolCallError(
+                            serverName: serverName,
+                            toolName: toolName,
+                            error: error,
+                            workspace: workspace
+                        )
+                    }
+                }
+
+                return result
             } catch {
                 // 捕获所有错误,返回友好的错误提示
-                return formatToolCallError(
+                return await formatToolCallError(
                     serverName: serverName,
                     toolName: toolName,
                     error: error,
@@ -396,10 +419,10 @@ final class MCPRouter: ObservableObject {
     // MARK: - Formatters
 
     private func formatListServersResult(_ result: [String: Any]) -> String {
-        var lines = ["📋 可用的 MCP Servers:\n"]
+        var lines = ["📋 Available MCP Servers:\n"]
 
         guard let serversList = result["servers"] as? [[String: Any]] else {
-            return "无可用 Servers"
+            return "No available servers"
         }
 
         for serverData in serversList {
@@ -412,19 +435,19 @@ final class MCPRouter: ObservableObject {
             lines.append("📦 **\(name)** (\(type)): \(description)")
         }
 
-        lines.append("\n💡 下一步:")
-        lines.append("  使用 mcp_router__list_tools 查看某个 Server 的工具列表")
-        lines.append("  示例: mcp_router__list_tools {\"server\": \"chrome-devtools\"}")
+        lines.append("\n💡 Next step:")
+        lines.append("  Use mcp_router__list_tools to view tool list for a server")
+        lines.append("  Example: mcp_router__list_tools {\"server\": \"chrome-devtools\"}")
         return lines.joined(separator: "\n")
     }
 
     private func formatListToolsResult(_ result: [String: Any]) -> String {
         guard let serverName = result["server"] as? String,
               let tools = result["tools"] as? [[String: Any]] else {
-            return "无工具数据"
+            return "No tool data"
         }
 
-        var lines = ["🔧 Server: \(serverName) 的工具列表 (\(tools.count) 个):\n"]
+        var lines = ["🔧 Tool list for server: \(serverName) (\(tools.count) tools):\n"]
 
         for tool in tools {
             if let name = tool["name"] as? String,
@@ -434,18 +457,18 @@ final class MCPRouter: ObservableObject {
             }
         }
 
-        lines.append("\n💡 下一步:")
-        lines.append("  使用 mcp_router__describe 查看工具的详细参数")
-        lines.append("  示例: mcp_router__describe {\"tool\": \"\(serverName)/tool_name\"}")
+        lines.append("\n💡 Next step:")
+        lines.append("  Use mcp_router__describe to view detailed parameters")
+        lines.append("  Example: mcp_router__describe {\"tool\": \"\(serverName)/tool_name\"}")
         return lines.joined(separator: "\n")
     }
 
     private func formatToolDetail(serverName: String, tool: MCPTool) -> String {
-        var lines = ["📖 工具详情: \(serverName)/\(tool.name)\n"]
-        lines.append("**描述**: \(tool.description)\n")
+        var lines = ["📖 Tool details: \(serverName)/\(tool.name)\n"]
+        lines.append("**Description**: \(tool.description)\n")
 
         if let schema = tool.inputSchema {
-            lines.append("**参数 Schema**:")
+            lines.append("**Parameter Schema**:")
             if let jsonData = try? JSONSerialization.data(withJSONObject: schema.mapValues { $0.value }),
                let jsonString = String(data: jsonData, encoding: .utf8) {
                 lines.append("```json")
@@ -454,45 +477,45 @@ final class MCPRouter: ObservableObject {
             }
         }
 
-        lines.append("\n💡 **如何调用这个工具**:")
-        lines.append("   直接使用工具名称: **\(serverName)/\(tool.name)**")
+        lines.append("\n💡 **How to call this tool**:")
+        lines.append("   Use tool name directly: **\(serverName)/\(tool.name)**")
         lines.append("")
-        lines.append("   示例:")
-        lines.append("   调用工具: \(serverName)/\(tool.name)")
-        lines.append("   传入参数: { \"参数名\": \"参数值\" }")
+        lines.append("   Example:")
+        lines.append("   Call tool: \(serverName)/\(tool.name)")
+        lines.append("   With parameters: { \"param_name\": \"param_value\" }")
         return lines.joined(separator: "\n")
     }
 
-    /// 格式化 Server 不存在的友好错误
+    /// Format friendly error for server not found
     private func formatServerNotFoundError(serverName: String, workspace: Workspace?) -> AnyCodable {
         let effectiveServers = getEffectiveServers(for: workspace)
         let availableServers = effectiveServers.map { "  • \($0.name)" }.joined(separator: "\n")
 
         let errorMessage = """
-        ❌ Server '\(serverName)' 不存在
+        ❌ Server '\(serverName)' does not exist
 
-        💡 建议的操作流程：
+        💡 Recommended workflow:
 
-        1️⃣ 使用 mcp_router__list_servers 查看可用的 MCP servers
-           当前可用的 Servers:
-        \(availableServers.isEmpty ? "  （暂无可用 Server）" : availableServers)
+        1️⃣ Use mcp_router__list_servers to view available MCP servers
+           Currently available servers:
+        \(availableServers.isEmpty ? "  (No available servers)" : availableServers)
 
-        2️⃣ 使用 mcp_router__list_tools 查看指定 server 的工具列表
-           示例:
-           工具: mcp_router__list_tools
-           参数: { "server": "server_name" }
+        2️⃣ Use mcp_router__list_tools to view tool list for a specific server
+           Example:
+           Tool: mcp_router__list_tools
+           Parameters: { "server": "server_name" }
 
-        3️⃣ 使用 mcp_router__describe 查看工具的参数定义
-           示例:
-           工具: mcp_router__describe
-           参数: { "tool": "server_name/tool_name" }
+        3️⃣ Use mcp_router__describe to view parameter definition for a tool
+           Example:
+           Tool: mcp_router__describe
+           Parameters: { "tool": "server_name/tool_name" }
 
-        4️⃣ 使用 mcp_router__call 调用工具
-           示例:
-           工具: mcp_router__call
-           参数: {
+        4️⃣ Use mcp_router__call to call the tool
+           Example:
+           Tool: mcp_router__call
+           Parameters: {
              "tool": "server_name/tool_name",
-             "arguments": { ...根据 describe 返回的 schema 填写... }
+             "arguments": { ...fill based on schema from describe... }
            }
         """
 
@@ -513,7 +536,7 @@ final class MCPRouter: ObservableObject {
         toolName: String,
         error: Error,
         workspace: Workspace?
-    ) -> AnyCodable {
+    ) async -> AnyCodable {
         // 检查是否为参数错误(通常包含 "invalid"、"required"、"expected" 等关键词)
         let errorDesc = error.localizedDescription.lowercased()
         let isParameterError = errorDesc.contains("invalid") ||
@@ -523,44 +546,49 @@ final class MCPRouter: ObservableObject {
                                errorDesc.contains("type") ||
                                errorDesc.contains("zod")
 
-        var errorMessage = "❌ 调用工具 '\(serverName)/\(toolName)' 失败\n\n"
+        var errorMessage = "❌ Failed to call tool '\(serverName)/\(toolName)'\n\n"
 
         if isParameterError {
+            // Auto-fetch tool schema
+            let schemaText: String
+            do {
+                schemaText = try await handleDescribe(
+                    toolPath: "\(serverName)/\(toolName)",
+                    workspace: workspace
+                )
+            } catch {
+                schemaText = "(Unable to fetch tool schema: \(error.localizedDescription))"
+            }
+
             errorMessage += """
-            🔍 可能是参数错误或格式不正确
+            🔍 Parameter error or incorrect format
 
-            💡 建议的操作流程：
-
-            1️⃣ 使用 mcp_router__describe 查看工具的参数定义
-               工具: mcp_router__describe
-               参数: { "tool": "\(serverName)/\(toolName)" }
-
-            2️⃣ 根据返回的 JSON Schema 检查参数格式
-
-            3️⃣ 使用正确的参数重新调用
-               工具: mcp_router__call
-               参数: {
-                 "tool": "\(serverName)/\(toolName)",
-                 "arguments": { ...根据 schema 填写正确的参数... }
-               }
-
-            📋 原始错误信息:
+            📋 Original error message:
             \(error.localizedDescription.prefix(300))
+
+            📖 Correct parameter definition for this tool:
+
+            \(schemaText)
+
+            💡 Recommended actions:
+            1. Carefully review the parameter definition (JSON Schema) above
+            2. If you need more details, use mcp_router__describe to view again
+            3. Fix parameters according to the definition and retry
             """
         } else {
             errorMessage += """
-            💡 建议的操作：
+            💡 Recommended actions:
 
-            1️⃣ 检查 server 是否正常运行
-               使用 mcp_router__list_tools 确认工具是否可用
-               参数: { "server": "\(serverName)" }
+            1️⃣ Check if the server is running properly
+               Use mcp_router__list_tools to confirm the tool is available
+               Parameters: { "server": "\(serverName)" }
 
-            2️⃣ 如果工具存在，使用 mcp_router__describe 查看参数要求
-               参数: { "tool": "\(serverName)/\(toolName)" }
+            2️⃣ If the tool exists, use mcp_router__describe to view parameter requirements
+               Parameters: { "tool": "\(serverName)/\(toolName)" }
 
-            3️⃣ 检查网络连接或 server 日志
+            3️⃣ Check network connection or server logs
 
-            📋 错误详情:
+            📋 Error details:
             \(error.localizedDescription)
             """
         }

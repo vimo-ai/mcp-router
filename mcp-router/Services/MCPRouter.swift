@@ -537,8 +537,18 @@ final class MCPRouter: ObservableObject {
         error: Error,
         workspace: Workspace?
     ) async -> AnyCodable {
+        // 提取完整的错误信息
+        let fullErrorMessage: String
+        if let mcpError = error as? MCPError,
+           case .rpcError(let code, let message) = mcpError {
+            // 保留完整的后端错误信息
+            fullErrorMessage = message
+        } else {
+            fullErrorMessage = error.localizedDescription
+        }
+
         // 检查是否为参数错误(通常包含 "invalid"、"required"、"expected" 等关键词)
-        let errorDesc = error.localizedDescription.lowercased()
+        let errorDesc = fullErrorMessage.lowercased()
         let isParameterError = errorDesc.contains("invalid") ||
                                errorDesc.contains("required") ||
                                errorDesc.contains("expected") ||
@@ -563,8 +573,8 @@ final class MCPRouter: ObservableObject {
             errorMessage += """
             🔍 Parameter error or incorrect format
 
-            📋 Original error message:
-            \(error.localizedDescription.prefix(300))
+            📋 Backend error message:
+            \(fullErrorMessage)
 
             📖 Correct parameter definition for this tool:
 
@@ -577,19 +587,15 @@ final class MCPRouter: ObservableObject {
             """
         } else {
             errorMessage += """
-            💡 Recommended actions:
+            📋 Backend error message:
+            \(fullErrorMessage)
 
-            1️⃣ Check if the server is running properly
-               Use mcp_router__list_tools to confirm the tool is available
-               Parameters: { "server": "\(serverName)" }
+            💡 Suggested next steps:
 
-            2️⃣ If the tool exists, use mcp_router__describe to view parameter requirements
-               Parameters: { "tool": "\(serverName)/\(toolName)" }
-
-            3️⃣ Check network connection or server logs
-
-            📋 Error details:
-            \(error.localizedDescription)
+            • Review the error message above
+            • Verify your input parameters are correct
+            • Use mcp_router__describe to check parameter requirements:
+              { "tool": "\(serverName)/\(toolName)" }
             """
         }
 

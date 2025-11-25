@@ -11,7 +11,10 @@ struct ServerToggleCard: View {
     let server: ServerConfig
     let isEnabled: Bool
     let isCustomized: Bool  // 是否被用户修改过
+    let isFlattenEnabled: Bool  // 平铺模式是否启用
+    let isFlattenCustomized: Bool  // 平铺模式是否被用户修改过
     let onToggle: (Bool) -> Void
+    let onFlattenToggle: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -44,6 +47,29 @@ struct ServerToggleCard: View {
                     .font(DesignSystem.Typography.caption)
                     .foregroundColor(DesignSystem.Colors.secondaryText)
                     .lineLimit(1)
+            }
+
+            // 平铺模式控制
+            if isEnabled {
+                HStack {
+                    Label("平铺模式", systemImage: "square.grid.2x2")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    Spacer()
+
+                    Toggle("", isOn: Binding(
+                        get: { isFlattenEnabled },
+                        set: { onFlattenToggle($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .background(isFlattenCustomized ? DesignSystem.Colors.overlay().opacity(0.3) : DesignSystem.Colors.overlay())
+                .cornerRadius(DesignSystem.CornerRadius.sm)
             }
 
             // 全局禁用提示
@@ -86,7 +112,10 @@ struct ServerToggleCard: View {
             ),
             isEnabled: true,
             isCustomized: false,
-            onToggle: { _ in }
+            isFlattenEnabled: true,
+            isFlattenCustomized: false,
+            onToggle: { _ in },
+            onFlattenToggle: { _ in }
         )
 
         // 已修改状态（蓝色边框）
@@ -99,7 +128,10 @@ struct ServerToggleCard: View {
             ),
             isEnabled: false,
             isCustomized: true,
-            onToggle: { _ in }
+            isFlattenEnabled: false,
+            isFlattenCustomized: true,
+            onToggle: { _ in },
+            onFlattenToggle: { _ in }
         )
     }
     .padding()

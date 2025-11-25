@@ -65,6 +65,65 @@ final class MCPRouter: ObservableObject {
         }
     }
 
+    /// 获取指定 Workspace 下所有需要平铺的 tools
+    /// - Parameter workspace: 目标 Workspace，nil 使用默认 Workspace
+    /// - Returns: 平铺的 MCPTool 数组，tool name 格式为 {server_name}/{tool_name}
+    func getFlattenedTools(for workspace: Workspace?) async -> [MCPTool] {
+        let effectiveServers = getEffectiveServers(for: workspace)
+        var flattenedTools: [MCPTool] = []
+
+        for server in effectiveServers {
+            // 检查该 server 是否启用了平铺模式
+            let isFlattenEnabled = workspace?.isFlattenEnabled(
+                server.name,
+                serverConfig: server,
+                defaultWorkspace: defaultWorkspace
+            ) ?? server.flattenMode
+
+            guard isFlattenEnabled else {
+                continue
+            }
+
+            // 获取该 server 的 tools
+            do {
+                let tools: [MCPTool]
+                if server.type == .http {
+                    // HTTP 类型
+                    guard let client = servers[server.name] else {
+                        print("⚠️ 跳过平铺: Server '\(server.name)' 未找到")
+                        continue
+                    }
+                    tools = try await client.listTools()
+                } else {
+                    // stdio 类型
+                    let workspaceToken = workspace?.token ?? "default"
+                    let stdioClient = try await stdioProcessPool.getOrCreateClient(
+                        workspaceToken: workspaceToken,
+                        config: server
+                    )
+                    tools = try await stdioClient.listTools()
+                }
+
+                // 将 tool name 添加前缀，格式为 {server_name}/{tool_name}
+                let prefixedTools = tools.map { tool in
+                    MCPTool(
+                        name: "\(server.name)/\(tool.name)",
+                        description: tool.description,
+                        inputSchema: tool.inputSchema
+                    )
+                }
+
+                flattenedTools.append(contentsOf: prefixedTools)
+                print("✅ 平铺 Server '\(server.name)' 的 \(prefixedTools.count) 个工具")
+            } catch {
+                print("⚠️ 获取 Server '\(server.name)' 的工具失败: \(error.localizedDescription)")
+            }
+        }
+
+        print("📋 总共平铺了 \(flattenedTools.count) 个工具")
+        return flattenedTools
+    }
+
     // MARK: - Lifecycle
 
     /// 加载并启动所有 Servers

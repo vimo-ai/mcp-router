@@ -146,6 +146,7 @@ struct WorkspaceDetailView: View {
                     Button {
                         workspace.serverOverrides.removeAll()
                         try? modelContext.save()
+                        NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
                     } label: {
                         Label("重置", systemImage: "arrow.counterclockwise")
                             .font(.caption)
@@ -164,8 +165,13 @@ struct WorkspaceDetailView: View {
                         server: server,
                         isEnabled: getEffectiveState(for: server),
                         isCustomized: workspace.isServerCustomized(server.name),
+                        isFlattenEnabled: getFlattenState(for: server),
+                        isFlattenCustomized: workspace.isFlattenCustomized(server.name),
                         onToggle: { isOn in
                             toggleServer(server, isOn: isOn)
+                        },
+                        onFlattenToggle: { isOn in
+                            toggleFlatten(server, isOn: isOn)
                         }
                     )
                 }
@@ -185,9 +191,26 @@ struct WorkspaceDetailView: View {
         return workspace.isServerEnabled(server.name, defaultWorkspace: defaultWorkspace)
     }
 
+    private func getFlattenState(for server: ServerConfig) -> Bool {
+        let defaultWorkspace = try? modelContext.fetch(
+            FetchDescriptor<Workspace>(
+                predicate: #Predicate { $0.isDefault == true }
+            )
+        ).first
+
+        return workspace.isFlattenEnabled(server.name, serverConfig: server, defaultWorkspace: defaultWorkspace)
+    }
+
     private func toggleServer(_ server: ServerConfig, isOn: Bool) {
         workspace.serverOverrides[server.name] = isOn
         try? modelContext.save()
+        NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
+    }
+
+    private func toggleFlatten(_ server: ServerConfig, isOn: Bool) {
+        workspace.flattenOverrides[server.name] = isOn
+        try? modelContext.save()
+        NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
     }
 
     // MARK: - Actions
@@ -209,6 +232,7 @@ struct WorkspaceDetailView: View {
 
         modelContext.delete(workspace)
         try? modelContext.save()
+        NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
     }
 }
 

@@ -434,16 +434,22 @@ actor HTTPServer {
             // 根据 Workspace 返回对应的工具列表
             let routerTools = await router.generateRouterTools(for: workspace)
 
+            // 获取平铺的 tools
+            let flattenedTools = await router.getFlattenedTools(for: workspace)
+
+            // 合并：meta tools + 平铺 tools
+            let allTools = routerTools + flattenedTools
+
             await MainActor.run {
                 if let ws = workspace {
-                    print("📋 返回 Workspace '\(ws.name)' 的 \(routerTools.count) 个元工具")
+                    print("📋 返回 Workspace '\(ws.name)' 的 \(routerTools.count) 个元工具 + \(flattenedTools.count) 个平铺工具")
                 } else {
-                    print("📋 返回默认的 \(routerTools.count) 个元工具")
+                    print("📋 返回默认的 \(routerTools.count) 个元工具 + \(flattenedTools.count) 个平铺工具")
                 }
             }
 
             // 转换为字典数组
-            let toolDicts = routerTools.map { tool -> [String: Any] in
+            let toolDicts = allTools.map { tool -> [String: Any] in
                 var dict: [String: Any] = [
                     "name": tool.name,
                     "description": tool.description
@@ -463,8 +469,32 @@ actor HTTPServer {
 
             let arguments = (params["arguments"]?.value as? [String: Any])?.mapValues { AnyCodable($0) } ?? [:]
 
-            let result = try await router.handleToolCall(name: toolName, arguments: arguments, workspace: workspace)
-            return (result, nil)
+            // 检查是否为平铺的 tool（包含 '/'）
+            if toolName.contains("/") && !toolName.hasPrefix("mcp_router__") {
+                // 平铺的 tool，直接路由到对应的 server
+                let parts = toolName.split(separator: "/")
+                guard parts.count == 2 else {
+                    throw MCPError.toolNotFound("Invalid flattened tool name format: \(toolName)")
+                }
+
+                let serverName = String(parts[0])
+                let actualToolName = String(parts[1])
+
+                print("🔀 路由平铺工具: \(serverName)/\(actualToolName)")
+
+                // 通过 mcp_router__call 调用（复用现有逻辑）
+                let callArgs: [String: AnyCodable] = [
+                    "tool": AnyCodable(toolName),
+                    "arguments": AnyCodable(arguments.mapValues { $0.value })
+                ]
+                let result = try await router.handleToolCall(name: "mcp_router__call", arguments: callArgs, workspace: workspace)
+                return (result, nil)
+            } else {
+                // 普通工具调用（meta tools）
+                let result = try await router.handleToolCall(name: toolName, arguments: arguments, workspace: workspace)
+                return (result, nil)
+            }
+
 
         default:
             throw MCPError.rpcError(-32601, "Method not found: \(request.method)")

@@ -301,7 +301,9 @@ struct SettingsView: View {
 
         do {
             try modelContext.save()
-            alertMessage = "端口已更新为 \(port)。请重启服务器使其生效。"
+            // 通知配置变化，触发服务器自动重启
+            NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+            alertMessage = "端口已更新为 \(port)，服务器正在重启..."
             showingAlert = true
             print("✅ 端口已更新: \(port)")
         } catch {

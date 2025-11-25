@@ -106,6 +106,9 @@ struct WorkspaceEditView: View {
                 try modelContext.save()
             }
 
+            // 通知配置变化
+            NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
+
             dismiss()
         } catch {
             print("❌ 保存 Workspace 失败: \(error)")

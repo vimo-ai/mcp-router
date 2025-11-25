@@ -596,6 +596,9 @@ struct JSONImportView: View {
                 // 保存
                 try modelContext.save()
 
+                // 通知配置变化
+                NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+
                 // 切换到完成状态
                 importState = .completed
 

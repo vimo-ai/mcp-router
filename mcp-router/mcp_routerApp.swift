@@ -141,7 +141,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         initializeDefaultServers()
         initializeDefaultWorkspace()
 
-        // 2. 创建菜单栏图标和 Popover
+        // 2. 设置为菜单栏应用（不在 Dock 显示）
+        NSApp.setActivationPolicy(.accessory)
+
+        // 3. 创建菜单栏图标和 Popover
         setupStatusItem()
         setupPopover()
 
@@ -152,6 +155,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         // 4. 监听 SwiftData 变化
         setupDataChangeObserver()
+    }
+
+    /// 关闭窗口时不退出应用，保持菜单栏运行
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
     }
 
     // MARK: - Data Change Observer

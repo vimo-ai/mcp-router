@@ -104,6 +104,10 @@ struct ServersView: View {
 
     private func deleteServer(_ server: ServerConfig) {
         modelContext.delete(server)
+        try? modelContext.save()
+
+        // 通知配置变化
+        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
     }
 
     private func exportToJSON() {
@@ -161,6 +165,7 @@ struct ServersView: View {
 // MARK: - Server Card
 
 struct ServerCardView: View {
+    @Environment(\.modelContext) private var modelContext
     @Bindable var server: ServerConfig
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -178,6 +183,10 @@ struct ServerCardView: View {
                 Toggle("", isOn: $server.isEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .onChange(of: server.isEnabled) {
+                        try? modelContext.save()
+                        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+                    }
             }
 
             // 描述

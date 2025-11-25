@@ -16,6 +16,16 @@ final class ServerConfig {
     var serverDescription: String
     var isEnabled: Bool  // 是否启用
 
+    // 是否启用平铺模式（直接暴露 tools 给 AI）
+    // 使用可选类型以支持从旧版本迁移
+    private var _flattenMode: Bool?
+
+    /// 是否启用平铺模式
+    var flattenMode: Bool {
+        get { _flattenMode ?? false }
+        set { _flattenMode = newValue }
+    }
+
     // HTTP 类型配置
     var url: String?
     var headers: [String: String]
@@ -35,7 +45,8 @@ final class ServerConfig {
         command: String? = nil,
         args: [String] = [],
         env: [String: String] = [:],
-        isEnabled: Bool = true  // 默认启用
+        isEnabled: Bool = true,
+        flattenMode: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -47,6 +58,7 @@ final class ServerConfig {
         self.args = args
         self.env = env
         self.isEnabled = isEnabled
+        self._flattenMode = flattenMode
     }
 }
 

@@ -94,12 +94,14 @@ struct mcp_routerApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        Window("MCP Router", id: "main") {
             ContentView()
                 .environmentObject(appDelegate)
                 .environmentObject(appDelegate.router)
         }
         .modelContainer(sharedModelContainer)
+        .defaultSize(width: 900, height: 600)
+        .defaultLaunchBehavior(.presented)
     }
 }
 
@@ -108,7 +110,8 @@ struct mcp_routerApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     static var sharedModelContainer: ModelContainer!
 
-    var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
     var httpServer: HTTPServer?
     let router = MCPRouter.shared
 
@@ -138,18 +141,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         initializeDefaultServers()
         initializeDefaultWorkspace()
 
-        // 2. 设置为菜单栏应用（不在 Dock 显示）
-        NSApp.setActivationPolicy(.accessory)
+        // 2. 创建菜单栏图标和 Popover
+        setupStatusItem()
+        setupPopover()
 
-        // 3. 创建菜单栏图标
-        setupMenuBar()
-
-        // 4. 启动 HTTP Server
+        // 3. 启动 HTTP Server
         Task {
             await startHTTPServer()
         }
 
-        // 5. 监听 SwiftData 变化
+        // 4. 监听 SwiftData 变化
         setupDataChangeObserver()
     }
 
@@ -157,42 +158,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @MainActor
     private func setupDataChangeObserver() {
-        guard let modelContainer = Self.sharedModelContainer else {
-            print("⚠️ ModelContainer not available for observer")
-            return
-        }
-
+        // 监听自定义的 ServerConfig 变化通知
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleDataChange(_:)),
-            name: .NSManagedObjectContextDidSave,
-            object: modelContainer.mainContext
+            selector: #selector(handleServerConfigChange),
+            name: .serverConfigDidChange,
+            object: nil
         )
 
-        print("✅ 已启用 ServerConfig 变化自动重启")
+        // 监听 Workspace 变化通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWorkspaceChange),
+            name: .workspaceDidChange,
+            object: nil
+        )
+
+        print("✅ 已启用配置变化自动重启")
     }
 
-    @objc private func handleDataChange(_ notification: Notification) {
-        guard let userInfo = notification.userInfo else { return }
-
-        // 检查是否有 ServerConfig 变化
-        let hasServerConfigChange = [
-            NSInsertedObjectsKey,
-            NSUpdatedObjectsKey,
-            NSDeletedObjectsKey
-        ].contains { key in
-            if let objects = userInfo[key] as? Set<NSManagedObject> {
-                return objects.contains { object in
-                    String(describing: type(of: object)).contains("ServerConfig")
-                }
-            }
-            return false
-        }
-
-        guard hasServerConfigChange else { return }
-
+    @objc private func handleServerConfigChange() {
         print("📡 检测到 ServerConfig 变化，准备重启 Server...")
+        scheduleServerRestart()
+    }
 
+    @objc private func handleWorkspaceChange() {
+        print("📡 检测到 Workspace 变化，准备重启 Server...")
+        scheduleServerRestart()
+    }
+
+    private func scheduleServerRestart() {
         // 使用防抖：1秒内的多次变化只触发一次重启
         restartDebounceTimer?.invalidate()
         restartDebounceTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
@@ -211,33 +206,51 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    // MARK: - Menu Bar
+    // MARK: - Status Item & Popover
 
-    private func setupMenuBar() {
+    private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "MCP Router")
+            button.action = #selector(togglePopover)
+            button.target = self
         }
-
-        updateMenu()
     }
 
-    private func updateMenu() {
-        let menu = NSMenu()
+    private func setupPopover() {
+        popover = NSPopover()
+        popover.contentSize = NSSize(width: 240, height: 280)
+        popover.behavior = .transient
+        popover.animates = true
 
         let port = appSettings?.serverPort ?? 19104
-        menu.addItem(NSMenuItem(title: "● Running (port \(port))", action: nil, keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Open Settings", action: #selector(openSettings), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "Restart Server", action: #selector(restartServer), keyEquivalent: "r"))
-        menu.addItem(NSMenuItem(title: "Copy URL", action: #selector(copyURL), keyEquivalent: "c"))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "u"))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit MCP Router", action: #selector(quit), keyEquivalent: "q"))
+        let menuView = MenuPopoverView(
+            serverPort: port,
+            onRestartServer: { [weak self] in
+                self?.restartServer()
+            },
+            onCheckUpdates: { [weak self] in
+                self?.checkForUpdates()
+            },
+            onQuit: { [weak self] in
+                self?.quit()
+            }
+        )
+        .environmentObject(router)
 
-        statusItem.menu = menu
+        popover.contentViewController = NSHostingController(rootView: menuView)
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem.button else { return }
+
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
     }
 
     // MARK: - Initialization
@@ -390,21 +403,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     // MARK: - Menu Actions
 
-    @objc func openSettings() {
-        NSApp.activate(ignoringOtherApps: true)
-
-        // 打开主窗口
-        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            // 如果窗口不存在，创建一个新的
-            if let url = URL(string: "mcprouter://main") {
-                NSWorkspace.shared.open(url)
-            }
-        }
-    }
-
-    @objc func restartServer() {
+    func restartServer() {
         Task {
             await httpServer?.stop()
             await startHTTPServer()
@@ -415,22 +414,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    @objc func copyURL() {
-        let port = appSettings?.serverPort ?? 19104
-        let url = "http://localhost:\(port)"
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(url, forType: .string)
-
-        showAlert(title: "已复制", message: "URL 已复制到剪贴板")
-    }
-
-    @objc func checkForUpdates() {
+    func checkForUpdates() {
         updaterController.updater.checkForUpdates()
     }
 
-    @objc func quit() {
+    func quit() {
         NSApp.terminate(nil)
     }
 
@@ -447,6 +435,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 }
 
 // MARK: - Sparkle Updater Delegate
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    /// ServerConfig 数据变化通知（新增、修改、删除）
+    static let serverConfigDidChange = Notification.Name("serverConfigDidChange")
+
+    /// Workspace 数据变化通知（新增、修改、删除）
+    static let workspaceDidChange = Notification.Name("workspaceDidChange")
+}
 
 class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     /// 返回允许的更新 channels

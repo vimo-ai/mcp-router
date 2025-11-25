@@ -20,6 +20,7 @@ struct ServerEditView: View {
     @State private var url: String = ""
     @State private var headers: [HeaderPair] = []
     @State private var isEnabled: Bool = true
+    @State private var flattenMode: Bool = false
 
     var isEditing: Bool {
         server != nil
@@ -72,8 +73,10 @@ struct ServerEditView: View {
                     }
                 }
 
-                Section {
-                    Toggle("Enabled", isOn: $isEnabled)
+                Section("状态") {
+                    Toggle("启用", isOn: $isEnabled)
+                    Toggle("平铺模式", isOn: $flattenMode)
+                        .help("启用后，该 Server 的工具将直接暴露给 AI，减少调用步骤")
                 }
             }
             .formStyle(.grouped)
@@ -120,6 +123,7 @@ struct ServerEditView: View {
         serverType = server.type
         url = server.url ?? ""
         isEnabled = server.isEnabled
+        flattenMode = server.flattenMode
 
         headers = server.headers.map { HeaderPair(key: $0.key, value: $0.value) }
     }
@@ -136,6 +140,7 @@ struct ServerEditView: View {
             existingServer.url = url
             existingServer.headers = headersDict
             existingServer.isEnabled = isEnabled
+            existingServer.flattenMode = flattenMode
         } else {
             // 添加
             let newServer = ServerConfig(
@@ -144,13 +149,17 @@ struct ServerEditView: View {
                 description: description,
                 url: url,
                 headers: headersDict,
-                isEnabled: isEnabled
+                isEnabled: isEnabled,
+                flattenMode: flattenMode
             )
             modelContext.insert(newServer)
         }
 
         // 保存到数据库
         try? modelContext.save()
+
+        // 通知配置变化
+        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
 
         dismiss()
     }

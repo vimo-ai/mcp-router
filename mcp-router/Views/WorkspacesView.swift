@@ -188,6 +188,7 @@ struct WorkspacesView: View {
 
         modelContext.insert(workspace)
         try? modelContext.save()
+        NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
 
         print("✅ 导入现有 Workspace: \(projectName) (Token: \(token))")
     }
@@ -208,6 +209,7 @@ struct WorkspacesView: View {
 
             modelContext.insert(workspace)
             try? modelContext.save()
+            NotificationCenter.default.post(name: .workspaceDidChange, object: nil)
 
             print("✅ 创建新 Workspace: \(projectName) (Token: \(token))")
 

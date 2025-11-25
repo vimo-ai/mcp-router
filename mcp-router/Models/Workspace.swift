@@ -21,6 +21,16 @@ final class Workspace {
     // 只记录用户修改过的配置，未记录的跟随 Default Workspace
     var serverOverrides: [String: Bool]
 
+    // Server 平铺模式覆盖: serverName -> flattenMode
+    // 使用可选类型以支持从旧版本迁移
+    private var _flattenOverrides: [String: Bool]?
+
+    /// Server 平铺模式覆盖
+    var flattenOverrides: [String: Bool] {
+        get { _flattenOverrides ?? [:] }
+        set { _flattenOverrides = newValue }
+    }
+
     init(
         id: UUID = UUID(),
         token: String,
@@ -28,6 +38,7 @@ final class Workspace {
         projectPath: String? = nil,
         isDefault: Bool = false,
         serverOverrides: [String: Bool] = [:],
+        flattenOverrides: [String: Bool] = [:],
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -36,6 +47,7 @@ final class Workspace {
         self.projectPath = projectPath
         self.isDefault = isDefault
         self.serverOverrides = serverOverrides
+        self._flattenOverrides = flattenOverrides
         self.createdAt = createdAt
     }
 }
@@ -100,6 +112,37 @@ extension Workspace {
         return allServers.filter { server in
             isServerEnabled(server.name, defaultWorkspace: defaultWorkspace)
         }.map { $0.name }
+    }
+
+    /// 获取 Server 的有效平铺模式状态
+    /// - Parameters:
+    ///   - serverName: Server 名称
+    ///   - serverConfig: Server 配置（用于获取默认值）
+    ///   - defaultWorkspace: Default Workspace（用于获取默认覆盖）
+    /// - Returns: 是否启用平铺模式
+    func isFlattenEnabled(_ serverName: String, serverConfig: ServerConfig?, defaultWorkspace: Workspace?) -> Bool {
+        // 如果有覆盖配置，使用覆盖值
+        if let override = flattenOverrides[serverName] {
+            return override
+        }
+
+        // 如果是 Default Workspace，使用 ServerConfig 的默认值
+        if isDefault {
+            return serverConfig?.flattenMode ?? false
+        }
+
+        // 否则跟随 Default Workspace 的配置
+        if let defaultWs = defaultWorkspace {
+            return defaultWs.flattenOverrides[serverName] ?? (serverConfig?.flattenMode ?? false)
+        }
+
+        // 最终回退到 ServerConfig 的默认值
+        return serverConfig?.flattenMode ?? false
+    }
+
+    /// 检查 Server 的平铺模式是否被用户修改过
+    func isFlattenCustomized(_ serverName: String) -> Bool {
+        return flattenOverrides[serverName] != nil
     }
 }
 

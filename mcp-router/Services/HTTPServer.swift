@@ -469,31 +469,18 @@ actor HTTPServer {
 
             let arguments = (params["arguments"]?.value as? [String: Any])?.mapValues { AnyCodable($0) } ?? [:]
 
-            // 检查是否为平铺的 tool（包含 '/'）
-            if toolName.contains("/") && !toolName.hasPrefix("mcp_router__") {
-                // 平铺的 tool，直接路由到对应的 server
-                let parts = toolName.split(separator: "/")
-                guard parts.count == 2 else {
-                    throw MCPError.toolNotFound("Invalid flattened tool name format: \(toolName)")
-                }
-
-                let serverName = String(parts[0])
-                let actualToolName = String(parts[1])
-
-                print("🔀 路由平铺工具: \(serverName)/\(actualToolName)")
-
-                // 通过 mcp_router__call 调用（复用现有逻辑）
-                let callArgs: [String: AnyCodable] = [
-                    "tool": AnyCodable(toolName),
-                    "arguments": AnyCodable(arguments.mapValues { $0.value })
-                ]
-                let result = try await router.handleToolCall(name: "mcp_router__call", arguments: callArgs, workspace: workspace)
-                return (result, nil)
-            } else {
-                // 普通工具调用（meta tools）
+            // Router 自身的元工具直接调用；其他工具统一走 mcp_router__call 以使用安全名映射
+            if toolName.hasPrefix("mcp_router__") {
                 let result = try await router.handleToolCall(name: toolName, arguments: arguments, workspace: workspace)
                 return (result, nil)
             }
+
+            let callArgs: [String: AnyCodable] = [
+                "tool": AnyCodable(toolName),
+                "arguments": AnyCodable(arguments.mapValues { $0.value })
+            ]
+            let result = try await router.handleToolCall(name: "mcp_router__call", arguments: callArgs, workspace: workspace)
+            return (result, nil)
 
 
         default:

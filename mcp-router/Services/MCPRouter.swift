@@ -15,6 +15,9 @@ final class MCPRouter: ObservableObject {
     @Published private(set) var servers: [String: MCPClient] = [:]
     @Published private(set) var serverConfigs: [ServerConfig] = []
 
+    // Workspace token -> safe tool name -> (serverName, toolName)
+    private var flattenedToolMaps: [String: [String: (server: String, tool: String)]] = [:]
+
     // Workspace 相关
     private var workspaces: [String: Workspace] = [:]  // token -> Workspace
     private var defaultWorkspace: Workspace?
@@ -23,6 +26,31 @@ final class MCPRouter: ObservableObject {
     private var stdioProcessPool = WorkspaceProcessPool()
 
     private init() {}
+
+    // MARK: - Helpers
+
+    private func workspaceToken(for workspace: Workspace?) -> String {
+        return workspace?.token ?? defaultWorkspace?.token ?? "default"
+    }
+
+    /// 将 server/tool 转换为符合 OpenAI 约束的安全名称，避免 `/`
+    private func makeSafeToolName(serverName: String, toolName: String, existing: Set<String>) -> String {
+        let raw = "\(serverName)__\(toolName)"
+        let sanitized = raw.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "_",
+            options: .regularExpression
+        )
+
+        // 防止碰撞: 如果已有同名，追加序号
+        var candidate = sanitized
+        var index = 2
+        while existing.contains(candidate) {
+            candidate = "\(sanitized)_\(index)"
+            index += 1
+        }
+        return candidate
+    }
 
     // MARK: - Workspace Management
 
@@ -67,10 +95,12 @@ final class MCPRouter: ObservableObject {
 
     /// 获取指定 Workspace 下所有需要平铺的 tools
     /// - Parameter workspace: 目标 Workspace，nil 使用默认 Workspace
-    /// - Returns: 平铺的 MCPTool 数组，tool name 格式为 {server_name}/{tool_name}
+    /// - Returns: 平铺的 MCPTool 数组，tool name 使用安全格式 {server_name}__{tool_name}
     func getFlattenedTools(for workspace: Workspace?) async -> [MCPTool] {
         let effectiveServers = getEffectiveServers(for: workspace)
         var flattenedTools: [MCPTool] = []
+        var mapping: [String: (server: String, tool: String)] = [:]
+        var usedNames = Set<String>()
 
         for server in effectiveServers {
             // 检查该 server 是否启用了平铺模式
@@ -104,24 +134,64 @@ final class MCPRouter: ObservableObject {
                     tools = try await stdioClient.listTools()
                 }
 
-                // 将 tool name 添加前缀，格式为 {server_name}/{tool_name}
-                let prefixedTools = tools.map { tool in
-                    MCPTool(
-                        name: "\(server.name)/\(tool.name)",
+                // 生成安全的工具名，格式 {server_name}__{tool_name}
+                let prefixedTools = tools.map { tool -> MCPTool in
+                    let safeName = makeSafeToolName(
+                        serverName: server.name,
+                        toolName: tool.name,
+                        existing: usedNames
+                    )
+                    usedNames.insert(safeName)
+                    mapping[safeName] = (server: server.name, tool: tool.name)
+                    return MCPTool(
+                        name: safeName,
                         description: tool.description,
                         inputSchema: tool.inputSchema
                     )
                 }
 
                 flattenedTools.append(contentsOf: prefixedTools)
-                print("✅ 平铺 Server '\(server.name)' 的 \(prefixedTools.count) 个工具")
+                print("✅ 平铺 Server '\(server.name)' 的 \(prefixedTools.count) 个工具 (安全名)")
             } catch {
                 print("⚠️ 获取 Server '\(server.name)' 的工具失败: \(error.localizedDescription)")
             }
         }
 
-        print("📋 总共平铺了 \(flattenedTools.count) 个工具")
+        // 保存映射，供调用/describe 使用
+        let token = workspaceToken(for: workspace)
+        flattenedToolMaps[token] = mapping
+
+        print("📋 总共平铺了 \(flattenedTools.count) 个工具 (Workspace: \(token))")
         return flattenedTools
+    }
+
+    /// 将 toolPath 解析为 (server, tool)，支持安全名(server__tool)和旧格式(server/tool)
+    private func resolveToolPath(_ toolPath: String, workspace: Workspace?) async throws -> (server: String, tool: String) {
+        let token = workspaceToken(for: workspace)
+
+        // 先查已缓存的安全名映射
+        if let mapping = flattenedToolMaps[token],
+           let entry = mapping[toolPath] {
+            return entry
+        }
+
+        // 兼容旧格式 server/tool
+        if toolPath.contains("/") {
+            let parts = toolPath.split(separator: "/")
+            guard parts.count == 2 else {
+                throw MCPError.toolNotFound("Invalid tool path format: \(toolPath)")
+            }
+            return (server: String(parts[0]), tool: String(parts[1]))
+        }
+
+        // 尝试刷新平铺列表后再查一次
+        _ = await getFlattenedTools(for: workspace)
+        if let mapping = flattenedToolMaps[token],
+           let entry = mapping[toolPath] {
+            return entry
+        }
+
+        throw MCPError.toolNotFound("Tool '\(toolPath)' not found")
     }
 
     // MARK: - Lifecycle
@@ -195,15 +265,15 @@ final class MCPRouter: ObservableObject {
                 description: """
                 📖 Get detailed parameter description for a tool
 
-                Parameters: { "tool": "server_name/tool_name" }
-                Example: { "tool": "context7/resolve-library-id" }
+                Parameters: { "tool": "server_name__tool_name" }
+                Example: { "tool": "context7__resolve-library-id" }
                 """,
                 inputSchema: [
                     "type": AnyCodable("object"),
                     "properties": AnyCodable([
                         "tool": [
                             "type": "string",
-                            "description": "Tool path, format: server_name/tool_name"
+                            "description": "Tool name, format: server_name__tool_name"
                         ] as [String: Any]
                     ]),
                     "required": AnyCodable(["tool"])
@@ -223,13 +293,13 @@ final class MCPRouter: ObservableObject {
 
                 Parameter format:
                 {
-                  "tool": "server_name/tool_name",
+                  "tool": "server_name__tool_name",
                   "arguments": { ...fill based on schema from describe... }
                 }
 
                 Example:
                 {
-                  "tool": "context7/resolve-library-id",
+                  "tool": "context7__resolve-library-id",
                   "arguments": { ...first use describe to check required parameters... }
                 }
                 """,
@@ -238,7 +308,7 @@ final class MCPRouter: ObservableObject {
                     "properties": AnyCodable([
                         "tool": [
                             "type": "string",
-                            "description": "Tool path, format: server_name/tool_name"
+                            "description": "Tool name, format: server_name__tool_name"
                         ] as [String: Any],
                         "arguments": [
                             "type": "object",
@@ -313,13 +383,9 @@ final class MCPRouter: ObservableObject {
 
     /// 处理 mcp_router__describe
     func handleDescribe(toolPath: String, workspace: Workspace?) async throws -> String {
-        let parts = toolPath.split(separator: "/")
-        guard parts.count == 2 else {
-            throw MCPError.toolNotFound("Invalid tool path format")
-        }
-
-        let serverName = String(parts[0])
-        let toolName = String(parts[1])
+        let resolved = try await resolveToolPath(toolPath, workspace: workspace)
+        let serverName = resolved.server
+        let toolName = resolved.tool
 
         // 查找 server 配置
         guard let config = serverConfigs.first(where: { $0.name == serverName }) else {
@@ -404,14 +470,10 @@ final class MCPRouter: ObservableObject {
             let toolArgs = arguments["arguments"]?.value as? [String: Any] ?? [:]
             let convertedArgs = toolArgs.mapValues { AnyCodable($0) }
 
-            // 解析 tool path
-            let parts = toolPath.split(separator: "/")
-            guard parts.count == 2 else {
-                throw MCPError.toolNotFound("Invalid tool path format: \(toolPath)")
-            }
-
-            let serverName = String(parts[0])
-            let toolName = String(parts[1])
+            // 解析 tool path (支持安全名 server__tool)
+            let resolved = try await resolveToolPath(toolPath, workspace: workspace)
+            let serverName = resolved.server
+            let toolName = resolved.tool
 
             // 查找 server 配置
             guard let config = serverConfigs.first(where: { $0.name == serverName }) else {
@@ -518,12 +580,12 @@ final class MCPRouter: ObservableObject {
 
         lines.append("\n💡 Next step:")
         lines.append("  Use mcp_router__describe to view detailed parameters")
-        lines.append("  Example: mcp_router__describe {\"tool\": \"\(serverName)/tool_name\"}")
+        lines.append("  Example: mcp_router__describe {\"tool\": \"\(serverName)__tool_name\"}")
         return lines.joined(separator: "\n")
     }
 
     private func formatToolDetail(serverName: String, tool: MCPTool) -> String {
-        var lines = ["📖 Tool details: \(serverName)/\(tool.name)\n"]
+        var lines = ["📖 Tool details: \(serverName)__\(tool.name)\n"]
         lines.append("**Description**: \(tool.description)\n")
 
         if let schema = tool.inputSchema {
@@ -537,10 +599,10 @@ final class MCPRouter: ObservableObject {
         }
 
         lines.append("\n💡 **How to call this tool**:")
-        lines.append("   Use tool name directly: **\(serverName)/\(tool.name)**")
+        lines.append("   Use tool name directly: **\(serverName)__\(tool.name)**")
         lines.append("")
         lines.append("   Example:")
-        lines.append("   Call tool: \(serverName)/\(tool.name)")
+        lines.append("   Call tool: \(serverName)__\(tool.name)")
         lines.append("   With parameters: { \"param_name\": \"param_value\" }")
         return lines.joined(separator: "\n")
     }

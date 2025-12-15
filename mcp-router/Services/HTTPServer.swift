@@ -248,6 +248,15 @@ actor HTTPServer {
         }
 
         // 处理 JSON-RPC 请求
+        // 尝试提取请求 id（用于错误响应）
+        let requestId: Int? = {
+            if let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+               let id = json["id"] as? Int {
+                return id
+            }
+            return nil
+        }()
+
         do {
             let jsonRequest = try JSONDecoder().decode(JSONRPCRequest.self, from: bodyData)
 
@@ -289,8 +298,10 @@ actor HTTPServer {
                 print("✅ 请求响应已发送 (200)")
             }
         } catch {
+            // ✅ 使用请求的 id，而不是 nil（符合 JSON-RPC 2.0 规范）
+            // 如果无法解析请求，id 才使用 nil
             let errorResponse = JSONRPCResponse(
-                id: nil,
+                id: requestId,
                 error: JSONRPCError(code: -32603, message: error.localizedDescription)
             )
 

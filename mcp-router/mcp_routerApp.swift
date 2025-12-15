@@ -137,6 +137,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // 0. 初始化应用设置
         initializeAppSettings()
 
+        // 0.5 注入 ModelContainer 到 Router（启用动态 Server 管理）
+        if let container = Self.sharedModelContainer {
+            router.setModelContainer(container)
+        }
+
         // 1. 初始化默认 Servers 和 Default Workspace
         initializeDefaultServers()
         initializeDefaultWorkspace()

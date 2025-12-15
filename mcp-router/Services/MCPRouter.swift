@@ -25,7 +25,18 @@ final class MCPRouter: ObservableObject {
     // stdio 进程池
     private var stdioProcessPool = WorkspaceProcessPool()
 
+    // SwiftData 数据库容器（用于动态管理 Server）
+    private var modelContainer: ModelContainer?
+
     private init() {}
+
+    // MARK: - ModelContainer 注入
+
+    /// 设置 ModelContainer，启用动态 Server 管理功能
+    func setModelContainer(_ container: ModelContainer) {
+        self.modelContainer = container
+        print("✅ MCPRouter 已启用动态 Server 管理")
+    }
 
     // MARK: - Helpers
 
@@ -184,6 +195,14 @@ final class MCPRouter: ObservableObject {
             return (server: String(parts[0]), tool: String(parts[1]))
         }
 
+        // 尝试解析 server__tool 格式（即使映射中没有缓存，也能直接解析）
+        if toolPath.contains("__") {
+            let parts = toolPath.split(separator: "__", maxSplits: 1)
+            if parts.count == 2 {
+                return (server: String(parts[0]), tool: String(parts[1]))
+            }
+        }
+
         // 尝试刷新平铺列表后再查一次
         _ = await getFlattenedTools(for: workspace)
         if let mapping = flattenedToolMaps[token],
@@ -312,10 +331,183 @@ final class MCPRouter: ObservableObject {
                         ] as [String: Any],
                         "arguments": [
                             "type": "object",
-                            "description": "Arguments to pass to the tool (must check parameter definition with mcp_router__describe first)"
+                            "description": "Arguments to pass to the tool (must check parameter definition with mcp_router__describe first)",
+                            "additionalProperties": true
                         ] as [String: Any]
                     ] as [String: [String: Any]]),
                     "required": AnyCodable(["tool", "arguments"])
+                ]
+            ),
+
+            // MARK: - Server 管理工具
+
+            MCPTool(
+                name: "mcp_router__add_server",
+                description: """
+                ➕ Add a new MCP Server configuration
+
+                Supports two types:
+                • stdio: Local process (npx, uvx, node, python, etc.)
+                • http: Remote HTTP server
+
+                Parameters:
+                - name: Unique server name (required)
+                - type: "stdio" or "http" (required)
+                - description: Server description (optional)
+                - command: Command to run, for stdio type (required for stdio)
+                - args: Command arguments array, for stdio type (optional)
+                - env: Environment variables object, for stdio type (optional)
+                - url: Server URL, for http type (required for http)
+                - headers: HTTP headers object, for http type (optional)
+                - flattenMode: Whether to flatten tools (default: false)
+
+                Example (stdio):
+                {
+                  "name": "filesystem",
+                  "type": "stdio",
+                  "description": "File system access",
+                  "command": "npx",
+                  "args": ["-y", "@anthropic/mcp-server-filesystem", "/path/to/dir"]
+                }
+
+                Example (http):
+                {
+                  "name": "my-api",
+                  "type": "http",
+                  "url": "http://localhost:8080/mcp",
+                  "description": "My custom MCP server"
+                }
+                """,
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "name": [
+                            "type": "string",
+                            "description": "Unique server name"
+                        ] as [String: Any],
+                        "type": [
+                            "type": "string",
+                            "enum": ["stdio", "http"],
+                            "description": "Server type: stdio or http"
+                        ] as [String: Any],
+                        "description": [
+                            "type": "string",
+                            "description": "Server description"
+                        ] as [String: Any],
+                        "command": [
+                            "type": "string",
+                            "description": "Command to run (for stdio type)"
+                        ] as [String: Any],
+                        "args": [
+                            "type": "array",
+                            "items": ["type": "string"],
+                            "description": "Command arguments (for stdio type)"
+                        ] as [String: Any],
+                        "env": [
+                            "type": "object",
+                            "additionalProperties": ["type": "string"],
+                            "description": "Environment variables (for stdio type)"
+                        ] as [String: Any],
+                        "url": [
+                            "type": "string",
+                            "description": "Server URL (for http type)"
+                        ] as [String: Any],
+                        "headers": [
+                            "type": "object",
+                            "additionalProperties": ["type": "string"],
+                            "description": "HTTP headers (for http type)"
+                        ] as [String: Any],
+                        "flattenMode": [
+                            "type": "boolean",
+                            "description": "Whether to flatten tools directly to AI"
+                        ] as [String: Any]
+                    ] as [String: [String: Any]]),
+                    "required": AnyCodable(["name", "type"])
+                ]
+            ),
+            MCPTool(
+                name: "mcp_router__remove_server",
+                description: """
+                ➖ Remove an MCP Server configuration
+
+                Parameters:
+                - name: Server name to remove (required)
+
+                ⚠️ This will permanently delete the server configuration.
+                """,
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "name": [
+                            "type": "string",
+                            "description": "Server name to remove"
+                        ] as [String: Any]
+                    ] as [String: [String: Any]]),
+                    "required": AnyCodable(["name"])
+                ]
+            ),
+            MCPTool(
+                name: "mcp_router__update_server",
+                description: """
+                ✏️ Update an existing MCP Server configuration
+
+                Parameters:
+                - name: Server name to update (required)
+                - description: New description (optional)
+                - enabled: Enable/disable server (optional)
+                - flattenMode: Enable/disable flatten mode (optional)
+                - command: New command, for stdio type (optional)
+                - args: New arguments, for stdio type (optional)
+                - env: New environment variables, for stdio type (optional)
+                - url: New URL, for http type (optional)
+                - headers: New headers, for http type (optional)
+
+                Only provided fields will be updated.
+                """,
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "name": [
+                            "type": "string",
+                            "description": "Server name to update"
+                        ] as [String: Any],
+                        "description": [
+                            "type": "string",
+                            "description": "New server description"
+                        ] as [String: Any],
+                        "enabled": [
+                            "type": "boolean",
+                            "description": "Enable or disable the server"
+                        ] as [String: Any],
+                        "flattenMode": [
+                            "type": "boolean",
+                            "description": "Enable or disable flatten mode"
+                        ] as [String: Any],
+                        "command": [
+                            "type": "string",
+                            "description": "New command (for stdio type)"
+                        ] as [String: Any],
+                        "args": [
+                            "type": "array",
+                            "items": ["type": "string"],
+                            "description": "New arguments (for stdio type)"
+                        ] as [String: Any],
+                        "env": [
+                            "type": "object",
+                            "additionalProperties": ["type": "string"],
+                            "description": "New environment variables (for stdio type)"
+                        ] as [String: Any],
+                        "url": [
+                            "type": "string",
+                            "description": "New URL (for http type)"
+                        ] as [String: Any],
+                        "headers": [
+                            "type": "object",
+                            "additionalProperties": ["type": "string"],
+                            "description": "New headers (for http type)"
+                        ] as [String: Any]
+                    ] as [String: [String: Any]]),
+                    "required": AnyCodable(["name"])
                 ]
             )
         ]
@@ -531,6 +723,42 @@ final class MCPRouter: ObservableObject {
                     workspace: workspace
                 )
             }
+        } else if name == "mcp_router__add_server" {
+            // 添加 Server
+            let result = try await handleAddServer(arguments: arguments)
+            return AnyCodable([
+                "content": [
+                    [
+                        "type": "text",
+                        "text": result
+                    ] as [String: Any]
+                ] as [[String: Any]]
+            ] as [String: Any])
+        } else if name == "mcp_router__remove_server" {
+            // 删除 Server
+            guard let serverName = arguments["name"]?.value as? String else {
+                throw MCPError.rpcError(-32602, "Missing 'name' parameter")
+            }
+            let result = try await handleRemoveServer(name: serverName)
+            return AnyCodable([
+                "content": [
+                    [
+                        "type": "text",
+                        "text": result
+                    ] as [String: Any]
+                ] as [[String: Any]]
+            ] as [String: Any])
+        } else if name == "mcp_router__update_server" {
+            // 更新 Server
+            let result = try await handleUpdateServer(arguments: arguments)
+            return AnyCodable([
+                "content": [
+                    [
+                        "type": "text",
+                        "text": result
+                    ] as [String: Any]
+                ] as [[String: Any]]
+            ] as [String: Any])
         }
 
         // 不应该走到这里（所有工具都应该通过 mcp_router__call）
@@ -556,9 +784,11 @@ final class MCPRouter: ObservableObject {
             lines.append("📦 **\(name)** (\(type)): \(description)")
         }
 
-        lines.append("\n💡 Next step:")
-        lines.append("  Use mcp_router__list_tools to view tool list for a server")
-        lines.append("  Example: mcp_router__list_tools {\"server\": \"chrome-devtools\"}")
+        lines.append("\n💡 Available actions:")
+        lines.append("  • mcp_router__list_tools - View tools for a server")
+        lines.append("  • mcp_router__add_server - Add a new MCP server")
+        lines.append("  • mcp_router__remove_server - Remove a server")
+        lines.append("  • mcp_router__update_server - Update server config")
         return lines.joined(separator: "\n")
     }
 
@@ -729,5 +959,258 @@ final class MCPRouter: ObservableObject {
             ] as [[String: Any]],
             "isError": true
         ] as [String: Any])
+    }
+
+    // MARK: - Server 管理方法
+
+    /// 添加新的 Server 配置
+    @MainActor
+    private func handleAddServer(arguments: [String: AnyCodable]) async throws -> String {
+        guard let container = modelContainer else {
+            throw MCPError.rpcError(-32603, "Database not available. Server management is disabled.")
+        }
+
+        // 解析参数
+        guard let name = arguments["name"]?.value as? String else {
+            throw MCPError.rpcError(-32602, "Missing required parameter: 'name'")
+        }
+        guard let typeStr = arguments["type"]?.value as? String,
+              let serverType = ServerType(rawValue: typeStr) else {
+            throw MCPError.rpcError(-32602, "Missing or invalid parameter: 'type' (must be 'stdio' or 'http')")
+        }
+
+        let context = container.mainContext
+
+        // 检查是否已存在同名 Server
+        let descriptor = FetchDescriptor<ServerConfig>(
+            predicate: #Predicate { $0.name == name }
+        )
+        let existing = try context.fetch(descriptor)
+        if !existing.isEmpty {
+            throw MCPError.rpcError(-32602, "Server '\(name)' already exists. Use mcp_router__update_server to modify it.")
+        }
+
+        // 验证类型特定的必填参数
+        if serverType == .stdio {
+            guard let _ = arguments["command"]?.value as? String else {
+                throw MCPError.rpcError(-32602, "Missing required parameter for stdio type: 'command'")
+            }
+        } else if serverType == .http {
+            guard let _ = arguments["url"]?.value as? String else {
+                throw MCPError.rpcError(-32602, "Missing required parameter for http type: 'url'")
+            }
+        }
+
+        // 创建新的 ServerConfig
+        let description = arguments["description"]?.value as? String ?? ""
+        let command = arguments["command"]?.value as? String
+        let args = arguments["args"]?.value as? [String] ?? []
+        let env = arguments["env"]?.value as? [String: String] ?? [:]
+        let url = arguments["url"]?.value as? String
+        let headers = arguments["headers"]?.value as? [String: String] ?? [:]
+        let flattenMode = arguments["flattenMode"]?.value as? Bool ?? false
+
+        let newServer = ServerConfig(
+            name: name,
+            type: serverType,
+            description: description,
+            url: url,
+            headers: headers,
+            command: command,
+            args: args,
+            env: env,
+            isEnabled: true,
+            flattenMode: flattenMode
+        )
+
+        context.insert(newServer)
+        try context.save()
+
+        // 更新内存中的配置
+        serverConfigs.append(newServer)
+
+        // 如果是 HTTP 类型，创建 Client
+        if serverType == .http {
+            let client = MCPClient(config: newServer)
+            servers[name] = client
+        }
+
+        // 发送通知触发热重载
+        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+
+        print("✅ 通过 MCP 添加了 Server: \(name)")
+
+        return """
+        ✅ Successfully added server '\(name)'
+
+        Configuration:
+        • Name: \(name)
+        • Type: \(serverType.rawValue)
+        • Description: \(description.isEmpty ? "(none)" : description)
+        \(serverType == .stdio ? "• Command: \(command ?? "")" : "• URL: \(url ?? "")")
+        • Flatten Mode: \(flattenMode ? "enabled" : "disabled")
+        • Status: enabled
+
+        The server is now available. Use mcp_router__list_servers to verify.
+        """
+    }
+
+    /// 删除 Server 配置
+    @MainActor
+    private func handleRemoveServer(name: String) async throws -> String {
+        guard let container = modelContainer else {
+            throw MCPError.rpcError(-32603, "Database not available. Server management is disabled.")
+        }
+
+        let context = container.mainContext
+
+        // 查找要删除的 Server
+        let descriptor = FetchDescriptor<ServerConfig>(
+            predicate: #Predicate { $0.name == name }
+        )
+        let results = try context.fetch(descriptor)
+
+        guard let serverToDelete = results.first else {
+            throw MCPError.rpcError(-32602, "Server '\(name)' not found")
+        }
+
+        let serverType = serverToDelete.type
+
+        // 从数据库删除
+        context.delete(serverToDelete)
+        try context.save()
+
+        // 从内存中移除
+        serverConfigs.removeAll { $0.name == name }
+        servers.removeValue(forKey: name)
+
+        // 发送通知触发热重载
+        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+
+        print("✅ 通过 MCP 删除了 Server: \(name)")
+
+        return """
+        ✅ Successfully removed server '\(name)'
+
+        The server configuration has been permanently deleted.
+        Type: \(serverType.rawValue)
+
+        Use mcp_router__list_servers to verify the current server list.
+        """
+    }
+
+    /// 更新 Server 配置
+    @MainActor
+    private func handleUpdateServer(arguments: [String: AnyCodable]) async throws -> String {
+        guard let container = modelContainer else {
+            throw MCPError.rpcError(-32603, "Database not available. Server management is disabled.")
+        }
+
+        guard let name = arguments["name"]?.value as? String else {
+            throw MCPError.rpcError(-32602, "Missing required parameter: 'name'")
+        }
+
+        let context = container.mainContext
+
+        // 查找要更新的 Server
+        let descriptor = FetchDescriptor<ServerConfig>(
+            predicate: #Predicate { $0.name == name }
+        )
+        let results = try context.fetch(descriptor)
+
+        guard let server = results.first else {
+            throw MCPError.rpcError(-32602, "Server '\(name)' not found")
+        }
+
+        var updates: [String] = []
+
+        // 更新各字段（只更新提供的参数）
+        if let description = arguments["description"]?.value as? String {
+            server.serverDescription = description
+            updates.append("description")
+        }
+
+        if let enabled = arguments["enabled"]?.value as? Bool {
+            server.isEnabled = enabled
+            updates.append("enabled = \(enabled)")
+        }
+
+        if let flattenMode = arguments["flattenMode"]?.value as? Bool {
+            server.flattenMode = flattenMode
+            updates.append("flattenMode = \(flattenMode)")
+        }
+
+        // stdio 类型特有字段
+        if server.type == .stdio {
+            if let command = arguments["command"]?.value as? String {
+                server.command = command
+                updates.append("command")
+            }
+            if let args = arguments["args"]?.value as? [String] {
+                server.args = args
+                updates.append("args")
+            }
+            if let env = arguments["env"]?.value as? [String: String] {
+                server.env = env
+                updates.append("env")
+            }
+        }
+
+        // http 类型特有字段
+        if server.type == .http {
+            if let url = arguments["url"]?.value as? String {
+                server.url = url
+                updates.append("url")
+            }
+            if let headers = arguments["headers"]?.value as? [String: String] {
+                server.headers = headers
+                updates.append("headers")
+            }
+        }
+
+        if updates.isEmpty {
+            return """
+            ⚠️ No updates applied to server '\(name)'
+
+            No valid update parameters were provided.
+            Available parameters:
+            • description, enabled, flattenMode
+            • For stdio: command, args, env
+            • For http: url, headers
+            """
+        }
+
+        try context.save()
+
+        // 更新内存中的配置
+        if let index = serverConfigs.firstIndex(where: { $0.name == name }) {
+            serverConfigs[index] = server
+        }
+
+        // 如果是 HTTP 类型且 URL 变化，重新创建 Client
+        if server.type == .http && updates.contains("url") {
+            let client = MCPClient(config: server)
+            servers[name] = client
+        }
+
+        // 发送通知触发热重载
+        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+
+        print("✅ 通过 MCP 更新了 Server: \(name)")
+
+        return """
+        ✅ Successfully updated server '\(name)'
+
+        Updated fields: \(updates.joined(separator: ", "))
+
+        Current configuration:
+        • Name: \(server.name)
+        • Type: \(server.type.rawValue)
+        • Description: \(server.serverDescription.isEmpty ? "(none)" : server.serverDescription)
+        • Status: \(server.isEnabled ? "enabled" : "disabled")
+        • Flatten Mode: \(server.flattenMode ? "enabled" : "disabled")
+
+        Use mcp_router__list_servers to verify the changes.
+        """
     }
 }

@@ -15,6 +15,7 @@ struct ServersView: View {
     @State private var showingAddServer = false
     @State private var editingServer: ServerConfig?
     @State private var showingImport = false
+    @State private var refreshTrigger = UUID()  // 用于强制刷新
 
     var body: some View {
         NavigationStack {
@@ -75,6 +76,12 @@ struct ServersView: View {
             .sheet(isPresented: $showingImport) {
                 JSONImportView()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .serverConfigDidChange)) { _ in
+                // 通过 MCP 添加/删除 Server 后，强制刷新 SwiftData 查询
+                modelContext.processPendingChanges()
+                refreshTrigger = UUID()
+            }
+            .id(refreshTrigger)  // 当 refreshTrigger 变化时重建视图
         }
     }
 

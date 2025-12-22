@@ -53,14 +53,16 @@ import Network
 actor HTTPServer {
     let port: UInt16
     let router: MCPRouter
+    let exposeManagementTools: Bool
     private var listener: NWListener?
 
     // Session 管理：存储每个连接的会话 ID
     private var sessions: [String: Date] = [:]  // sessionId -> 创建时间
 
-    init(port: UInt16 = 3000, router: MCPRouter) {
+    init(port: UInt16 = 3000, router: MCPRouter, exposeManagementTools: Bool = false) {
         self.port = port
         self.router = router
+        self.exposeManagementTools = exposeManagementTools
     }
 
     /// 生成新的会话 ID
@@ -321,42 +323,32 @@ actor HTTPServer {
 
     // MARK: - GET 请求处理（SSE 流）
 
-    /// 处理 GET 请求，建立 SSE 流用于服务器推送
+    /// 处理 GET 请求
     ///
-    /// ⚡️ NIO 优化点：
-    /// 当前实现返回空的 SSE 流（服务器不主动推送）
-    /// 完整实现需要：
-    /// ```swift
-    /// // 1. 保持连接不关闭
-    /// // 2. 当有事件时，发送 SSE 格式的数据：
-    /// data: {"jsonrpc":"2.0","method":"notifications/...","params":{...}}\n\n
-    /// // 3. 使用 NIO 的 EventLoop 调度事件推送
-    /// ```
+    /// 根据 MCP 规范 2025-06-18，服务器可以：
+    /// - 返回 SSE 流用于服务器主动推送通知
+    /// - 返回 405 Method Not Allowed 表示不支持 SSE
+    ///
+    /// 当前 mcp-router 作为中间件，尚未实现后端通知转发，
+    /// 因此返回 405 告知客户端不支持 SSE 推送。
+    ///
+    /// 未来如需支持通知转发，需要：
+    /// 1. MCPClient 监听后端服务器的 SSE 流
+    /// 2. 保持与客户端的 SSE 连接
+    /// 3. 将后端通知转发给客户端
     private func handleGetRequest(path: String, headers: [String: String], connection: NWConnection) async {
         let sessionId = headers["mcp-session-id"]
 
         print("📡 GET 请求: 路径=\(path), Session=\(sessionId ?? "无")")
 
-        // 验证 Session ID
-        if let sessionId = sessionId, validateSession(sessionId) {
-            print("✅ SSE 流请求，Session 有效")
-
-            // 返回 SSE 流响应头
-            // 注意：这里我们返回空流，因为当前不需要服务器主动推送
-            // 如果将来需要推送，需要保持连接并定期发送事件
-            sendResponse(
-                connection: connection,
-                statusCode: 200,
-                body: "",  // SSE 流可以为空
-                contentType: "text/event-stream",
-                keepAlive: false,  // 暂时关闭，因为我们不推送事件
-                sessionId: sessionId
-            )
-        } else {
-            print("⚠️ SSE 流请求，但 Session 无效或不存在")
-            // 返回 404 表示会话不存在，客户端需要重新初始化
-            sendResponse(connection: connection, statusCode: 404, body: "Session not found")
-        }
+        // 返回 405 表示当前不支持 SSE 流
+        // 这是 MCP 规范允许的行为，客户端会正常处理
+        print("ℹ️ 返回 405 - 当前不支持 SSE 推送")
+        sendResponse(
+            connection: connection,
+            statusCode: 405,
+            body: "Method Not Allowed - SSE not supported"
+        )
     }
 
     // MARK: - DELETE 请求处理（关闭会话）
@@ -443,7 +435,7 @@ actor HTTPServer {
 
         case "tools/list":
             // 根据 Workspace 返回对应的工具列表
-            let routerTools = await router.generateRouterTools(for: workspace)
+            let routerTools = await router.generateRouterTools(for: workspace, exposeManagementTools: exposeManagementTools)
 
             // 获取平铺的 tools
             let flattenedTools = await router.getFlattenedTools(for: workspace)

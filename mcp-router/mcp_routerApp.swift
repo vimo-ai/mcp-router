@@ -345,9 +345,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let workspaces = await MainActor.run { loadWorkspaces() }
         await router.loadWorkspaces(workspaces)
 
-        // 使用配置的端口
+        // 使用配置的端口和工具模式
         let port = UInt16(appSettings?.serverPort ?? 19104)
-        let server = HTTPServer(port: port, router: router)
+        let exposeManagementTools = appSettings?.exposeManagementTools ?? false
+        let server = HTTPServer(port: port, router: router, exposeManagementTools: exposeManagementTools)
         self.httpServer = server
 
         do {

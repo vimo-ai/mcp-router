@@ -234,13 +234,13 @@ final class MCPRouter: ObservableObject {
     // MARK: - Router Tools (元工具)
 
     /// 生成 Router 自身的工具列表(根据 Workspace 过滤)
-    func generateRouterTools(for workspace: Workspace? = nil) -> [MCPTool] {
+    func generateRouterTools(for workspace: Workspace? = nil, exposeManagementTools: Bool = false) -> [MCPTool] {
         let effectiveServers = getEffectiveServers(for: workspace)
         let serverSummary = effectiveServers.map { config in
             "• \(config.name): \(config.serverDescription)"
         }.joined(separator: "\n")
 
-        return [
+        var tools: [MCPTool] = [
             MCPTool(
                 name: "mcp_router__list_servers",
                 description: """
@@ -337,11 +337,15 @@ final class MCPRouter: ObservableObject {
                     ] as [String: [String: Any]]),
                     "required": AnyCodable(["tool", "arguments"])
                 ]
-            ),
+            )
+        ]
 
-            // MARK: - Server 管理工具
+        // 只在 Full 模式下暴露管理工具
+        if exposeManagementTools {
+            tools.append(contentsOf: [
+                // MARK: - Server 管理工具
 
-            MCPTool(
+                MCPTool(
                 name: "mcp_router__add_server",
                 description: """
                 ➕ Add a new MCP Server configuration
@@ -510,7 +514,10 @@ final class MCPRouter: ObservableObject {
                     "required": AnyCodable(["name"])
                 ]
             )
-        ]
+            ])
+        }
+
+        return tools
     }
 
     // MARK: - Tool Handlers

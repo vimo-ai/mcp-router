@@ -14,6 +14,7 @@ final class AppSettings {
     var serverPort: Int
     var allowPrereleaseUpdates: Bool = false // 是否接收预发布版本（beta/alpha/rc），默认 false
     var theme: String = AppTheme.auto.rawValue // 主题设置: auto/light/dark
+    var exposeManagementTools: Bool = false // 是否暴露 add/remove/update 工具（默认 light 模式，不暴露）
     var createdAt: Date
     var updatedAt: Date
 
@@ -21,12 +22,14 @@ final class AppSettings {
         serverPort: Int = 19104,
         allowPrereleaseUpdates: Bool = false, // 默认只接收正式版
         theme: String = AppTheme.auto.rawValue,
+        exposeManagementTools: Bool = false, // 默认 light 模式
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
         self.serverPort = serverPort
         self.allowPrereleaseUpdates = allowPrereleaseUpdates
         self.theme = theme
+        self.exposeManagementTools = exposeManagementTools
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

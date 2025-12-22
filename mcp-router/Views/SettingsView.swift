@@ -173,6 +173,40 @@ struct SettingsView: View {
                     .foregroundColor(DesignSystem.Colors.warning)
             }
             .containerStyle()
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+                Text("MCP 工具模式")
+                    .font(DesignSystem.Typography.subheadline)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Toggle("暴露服务器管理工具 (Full 模式)", isOn: Binding(
+                    get: { settings.exposeManagementTools },
+                    set: { newValue in
+                        settings.exposeManagementTools = newValue
+                        settings.updatedAt = Date()
+                        try? modelContext.save()
+                        // 通知配置变化，触发工具列表更新
+                        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+                    }
+                ))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(settings.exposeManagementTools ? "📝 Full 模式" : "🔒 Light 模式")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(settings.exposeManagementTools ? .blue : .green)
+                    }
+
+                    Text(settings.exposeManagementTools
+                         ? "暴露 add_server、remove_server、update_server 工具，允许 AI 动态管理服务器配置"
+                         : "仅暴露 list、describe、call 工具，节省 token 并提高安全性（推荐）")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+            }
+            .containerStyle()
         }
     }
 

@@ -89,12 +89,14 @@ jobs:
           install_name_tool -id "@rpath/libmcp_router_core.dylib" mcp-router/Lib/libmcp_router_core.dylib
           ls -la mcp-router/Lib/
 
-      # Package dylib for release
+      # Package dylib for release (rename to mcp_router_core for MCPRouterKit compatibility)
       - name: Package Dylib
         run: |
           cd build/lib
-          zip -r ../libmcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip \
-            libmcp_router_core.dylib mcp_router_core.h module.modulemap
+          # 重命名为 mcp_router_core (MCPRouterKit 期望的格式)
+          cp libmcp_router_core.dylib mcp_router_core
+          zip -r ../mcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip \
+            mcp_router_core mcp_router_core.h module.modulemap
 
       - name: Build App
         run: |
@@ -231,7 +233,7 @@ jobs:
         with:
           files: |
             build/mcp-router-${{ steps.version.outputs.VERSION }}.zip
-            build/libmcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip
+            build/mcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'alpha') || contains(steps.version.outputs.VERSION, 'rc') }}
           generate_release_notes: true

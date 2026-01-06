@@ -69,9 +69,9 @@ jobs:
           # 复制头文件
           cp core/include/mcp_router_core.h build/lib/
 
-          # 创建 module.modulemap
+          # 创建 module.modulemap (MCPRouterCore 驼峰命名与 Swift import 一致)
           cat > build/lib/module.modulemap <<'EOF'
-          module mcp_router_core {
+          module MCPRouterCore {
               header "mcp_router_core.h"
               export *
           }

@@ -48,6 +48,14 @@ jobs:
           cd core
           cargo test
 
+      - name: Upload dylib artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-core-dylib
+          path: |
+            build/lib/libmcp_router_core.dylib
+            core/include/mcp_router_core.h
+
   build-swift-app:
     runs-on: macos-26
     needs: build-rust-core
@@ -55,6 +63,20 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download dylib artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-core-dylib
+          path: mcp-router/Lib/
+
+      - name: Prepare dylib
+        run: |
+          mv mcp-router/Lib/build/lib/libmcp_router_core.dylib mcp-router/Lib/
+          mv mcp-router/Lib/core/include/mcp_router_core.h mcp-router/Lib/
+          rm -rf mcp-router/Lib/build mcp-router/Lib/core
+          install_name_tool -id "@rpath/libmcp_router_core.dylib" mcp-router/Lib/libmcp_router_core.dylib
+          ls -la mcp-router/Lib/
 
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1

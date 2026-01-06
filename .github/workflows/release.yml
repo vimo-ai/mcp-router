@@ -81,6 +81,14 @@ jobs:
           file build/lib/libmcp_router_core.dylib
           ls -la build/lib/
 
+      # Copy dylib to Swift project for build
+      - name: Prepare dylib for Swift build
+        run: |
+          cp build/lib/libmcp_router_core.dylib mcp-router/Lib/
+          cp build/lib/mcp_router_core.h mcp-router/Lib/
+          install_name_tool -id "@rpath/libmcp_router_core.dylib" mcp-router/Lib/libmcp_router_core.dylib
+          ls -la mcp-router/Lib/
+
       # Package dylib for release
       - name: Package Dylib
         run: |

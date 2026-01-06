@@ -1,0 +1,4 @@
+/target
+
+# Local development scripts (paths are machine-specific)
+/scripts/update_*.sh

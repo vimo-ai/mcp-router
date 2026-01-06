@@ -435,6 +435,7 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
+					"$(SRCROOT)/mcp-router/Lib",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = "0.0.2-beta.12";
@@ -453,6 +454,18 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/mcp-router/Lib",
+				);
+				SWIFT_INCLUDE_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/mcp-router/Lib",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lmcp_router_core",
+				);
 			};
 			name = Debug;
 		};
@@ -485,6 +498,7 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
+					"$(SRCROOT)/mcp-router/Lib",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = "0.0.2-beta.12";
@@ -503,6 +517,18 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/mcp-router/Lib",
+				);
+				SWIFT_INCLUDE_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/mcp-router/Lib",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lmcp_router_core",
+				);
 			};
 			name = Release;
 		};

@@ -146,6 +146,30 @@ extension Workspace {
     }
 }
 
+// MARK: - Rust FFI Conversion
+
+extension Workspace {
+    /// Convert to Rust-compatible format for FFI
+    func toRustWorkspace() -> RustWorkspace {
+        RustWorkspace(
+            token: token,
+            name: name,
+            is_default: isDefault,
+            server_overrides: serverOverrides,
+            flatten_overrides: flattenOverrides
+        )
+    }
+}
+
+/// Rust-compatible Workspace for JSON serialization
+struct RustWorkspace: Encodable {
+    let token: String
+    let name: String
+    let is_default: Bool
+    let server_overrides: [String: Bool]
+    let flatten_overrides: [String: Bool]
+}
+
 // MARK: - Errors
 
 enum WorkspaceError: LocalizedError {

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: macos-26
+    runs-on: macos-14
 
     steps:
       - name: Checkout code
@@ -19,7 +19,12 @@ jobs:
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '26.0'
+          xcode-version: 'latest-stable'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Get version from tag
         id: version
@@ -41,6 +46,55 @@ jobs:
           NEW_BUILD=$((LATEST_BUILD + 1))
           echo "BUILD_NUMBER=$NEW_BUILD" >> $GITHUB_OUTPUT
           echo "📦 Latest build: $LATEST_BUILD, New build: $NEW_BUILD"
+
+      # Build Rust core for both architectures
+      - name: Build Rust Core (arm64)
+        run: |
+          cd core
+          cargo build --release --target aarch64-apple-darwin
+
+      - name: Build Rust Core (x86_64)
+        run: |
+          cd core
+          cargo build --release --target x86_64-apple-darwin
+
+      - name: Create Universal Binary
+        run: |
+          mkdir -p build/lib
+          lipo -create \
+            core/target/aarch64-apple-darwin/release/libmcp_router_core.dylib \
+            core/target/x86_64-apple-darwin/release/libmcp_router_core.dylib \
+            -output build/lib/libmcp_router_core.dylib
+
+          # 复制头文件
+          cp core/include/mcp_router_core.h build/lib/
+
+          # 创建 module.modulemap
+          cat > build/lib/module.modulemap <<'EOF'
+          module mcp_router_core {
+              header "mcp_router_core.h"
+              export *
+          }
+          EOF
+
+          echo "✅ Universal binary created"
+          file build/lib/libmcp_router_core.dylib
+          ls -la build/lib/
+
+      # Copy dylib to Swift project for build
+      - name: Prepare dylib for Swift build
+        run: |
+          cp build/lib/libmcp_router_core.dylib mcp-router/Lib/
+          cp build/lib/mcp_router_core.h mcp-router/Lib/
+          install_name_tool -id "@rpath/libmcp_router_core.dylib" mcp-router/Lib/libmcp_router_core.dylib
+          ls -la mcp-router/Lib/
+
+      # Package dylib for release
+      - name: Package Dylib
+        run: |
+          cd build/lib
+          zip -r ../libmcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip \
+            libmcp_router_core.dylib mcp_router_core.h module.modulemap
 
       - name: Build App
         run: |
@@ -69,7 +123,7 @@ jobs:
           echo "✅ 验证签名结果:"
           codesign --verify --deep --strict --verbose=2 build/mcp-router.app
 
-      - name: Create ZIP
+      - name: Create App ZIP
         run: |
           cd build
           ditto -c -k --sequesterRsrc --keepParent mcp-router.app mcp-router-${{ steps.version.outputs.VERSION }}.zip
@@ -177,8 +231,9 @@ jobs:
         with:
           files: |
             build/mcp-router-${{ steps.version.outputs.VERSION }}.zip
+            build/libmcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'alpha') || contains(steps.version.outputs.VERSION, 'rc') }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

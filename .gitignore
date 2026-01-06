@@ -106,3 +106,16 @@ Sparkle-*/
 *.tar.xz
 build/*.zip
 build/appcast-item.xml
+
+# Rust / Cargo
+core/target/
+core/Cargo.lock
+*.o
+*.rcgu.o
+
+# Claude / AI tools
+.claude/
+.vlaude/
+
+# Rust dylib (built locally, CI builds separately)
+mcp-router/Lib/*.dylib

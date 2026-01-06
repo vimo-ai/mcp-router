@@ -112,8 +112,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    var httpServer: HTTPServer?
+
+    // 使用 Rust Core 替代 Swift 实现
+    let routerCore = MCPRouterCore()
+    // 保留 Swift Router 用于 UI 兼容（后续可以逐步迁移）
     let router = MCPRouter.shared
+    // 标记是否使用 Rust Core
+    private var useRustCore = true
 
     // Sparkle 更新 delegate
     private lazy var sparkleDelegate = SparkleUpdaterDelegate()
@@ -210,7 +215,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func autoRestartServer() {
         Task {
-            await httpServer?.stop()
+            if useRustCore {
+                do {
+                    try routerCore.stopServer()
+                } catch {
+                    print("⚠️ 停止服务器时出错: \(error)")
+                }
+            }
+
             await startHTTPServer()
 
             await MainActor.run {
@@ -340,23 +352,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func startHTTPServer() async {
         // 加载 Servers 和 Workspaces
         let configs = await MainActor.run { loadServerConfigs() }
-        await router.loadServers(configs)
-
         let workspaces = await MainActor.run { loadWorkspaces() }
-        await router.loadWorkspaces(workspaces)
 
         // 使用配置的端口和工具模式
         let port = UInt16(appSettings?.serverPort ?? 19104)
         let exposeManagementTools = appSettings?.exposeManagementTools ?? false
-        let server = HTTPServer(port: port, router: router, exposeManagementTools: exposeManagementTools)
-        self.httpServer = server
 
-        do {
-            try await server.start()
-        } catch {
-            await MainActor.run {
-                print("❌ 启动 HTTP 服务器失败: \(error)")
-                showAlert(title: "启动失败", message: "无法启动 HTTP 服务器：\(error.localizedDescription)")
+        if useRustCore {
+            // 使用 Rust Core
+            do {
+                try routerCore.loadServers(configs)
+                print("✅ [Rust Core] 已加载 \(configs.count) 个 Servers")
+
+                // 加载 Workspaces (转换为 JSON)
+                let encoder = JSONEncoder()
+                let workspacesData = try encoder.encode(workspaces.map { $0.toRustWorkspace() })
+                if let json = String(data: workspacesData, encoding: .utf8) {
+                    try routerCore.loadWorkspaces(json: json)
+                    print("✅ [Rust Core] 已加载 \(workspaces.count) 个 Workspaces")
+                }
+
+                // 设置管理工具模式
+                routerCore.exposeManagementTools = exposeManagementTools
+
+                // 启动 HTTP 服务器
+                try routerCore.startServer(port: port)
+                print("✅ [Rust Core] HTTP 服务器已启动，端口: \(port)")
+                print("📦 [Rust Core] 版本: \(routerCore.version)")
+
+            } catch {
+                await MainActor.run {
+                    print("❌ [Rust Core] 启动失败: \(error)")
+                    showAlert(title: "启动失败", message: "无法启动 HTTP 服务器：\(error.localizedDescription)")
+                }
+            }
+        } else {
+            // 回退到 Swift 实现
+            await router.loadServers(configs)
+            router.loadWorkspaces(workspaces)
+
+            let server = HTTPServer(port: port, router: router, exposeManagementTools: exposeManagementTools)
+
+            do {
+                try await server.start()
+            } catch {
+                await MainActor.run {
+                    print("❌ 启动 HTTP 服务器失败: \(error)")
+                    showAlert(title: "启动失败", message: "无法启动 HTTP 服务器：\(error.localizedDescription)")
+                }
             }
         }
     }
@@ -419,7 +462,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func restartServer() {
         Task {
-            await httpServer?.stop()
+            if useRustCore {
+                do {
+                    try routerCore.stopServer()
+                } catch {
+                    print("⚠️ 停止服务器时出错: \(error)")
+                }
+            }
+
             await startHTTPServer()
 
             await MainActor.run {

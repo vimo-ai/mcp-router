@@ -11,9 +11,29 @@
 #include <stdlib.h>
 
 /**
+ * Error code indicating a forward to meta tool is needed
+ * Using -32000 (server-defined error range: -32000 to -32099)
+ */
+#define FORWARD_TO_META_TOOL -32000
+
+/**
  * Opaque handle to the router
  */
 typedef struct McpRouterHandle McpRouterHandle;
+
+/**
+ * Callback type for async tool calls
+ * - context: opaque pointer passed back to Swift (e.g., continuation)
+ * - success: true if call succeeded
+ * - result_json: JSON string of result (null if failed)
+ * - error_message: error message (null if succeeded)
+ *
+ * NOTE: Strings are valid only during callback. Swift must copy if needed.
+ */
+typedef void (*McpToolCallback)(void *context,
+                                bool success,
+                                const char *result_json,
+                                const char *error_message);
 
 /**
  * Create a new router instance
@@ -124,5 +144,47 @@ void mcp_router_init_logging(void);
  * Get version string
  */
 char *mcp_router_version(void);
+
+/**
+ * Call a tool asynchronously
+ *
+ * This function returns immediately. The callback will be invoked on completion.
+ * The callback is called from a background thread - Swift must dispatch to main if needed.
+ *
+ * Parameters:
+ * - handle: Router handle
+ * - server_name: Name of the server (e.g., "lsp")
+ * - tool_name: Name of the tool (e.g., "lsp_goto_definition")
+ * - arguments_json: JSON string of tool arguments
+ * - workspace_token: Optional workspace token (can be null for default)
+ * - timeout_secs: Timeout in seconds (0 = default 120s)
+ * - callback: Function to call on completion
+ * - context: Opaque pointer passed to callback (typically Swift continuation)
+ * - out_error: Receives error message if function returns false
+ *
+ * Returns: true if async call was started, false if setup failed
+ */
+bool mcp_router_call_tool_async(struct McpRouterHandle *handle,
+                                const char *server_name,
+                                const char *tool_name,
+                                const char *arguments_json,
+                                const char *workspace_token,
+                                uint32_t timeout_secs,
+                                McpToolCallback callback,
+                                void *context,
+                                char **out_error);
+
+/**
+ * List tools for a server asynchronously
+ *
+ * Similar to call_tool_async, returns immediately and invokes callback on completion.
+ */
+bool mcp_router_list_tools_async(struct McpRouterHandle *handle,
+                                 const char *server_name,
+                                 const char *workspace_token,
+                                 uint32_t timeout_secs,
+                                 McpToolCallback callback,
+                                 void *context,
+                                 char **out_error);
 
 #endif  /* MCP_ROUTER_CORE_H */

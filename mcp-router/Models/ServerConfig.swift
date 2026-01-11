@@ -30,10 +30,19 @@ final class ServerConfig {
     var url: String?
     var headers: [String: String]
 
-    // stdio 类型配置 (暂不实现)
+    // stdio 类型配置
     var command: String?
     var args: [String]
     var env: [String: String]
+
+    // stdio 协议类型（使用可选类型以支持从旧版本迁移）
+    private var _stdioProtocol: StdioProtocol?
+
+    /// stdio 通信协议
+    var stdioProtocol: StdioProtocol {
+        get { _stdioProtocol ?? .line }
+        set { _stdioProtocol = newValue }
+    }
 
     init(
         id: UUID = UUID(),
@@ -46,7 +55,8 @@ final class ServerConfig {
         args: [String] = [],
         env: [String: String] = [:],
         isEnabled: Bool = true,
-        flattenMode: Bool = false
+        flattenMode: Bool = false,
+        stdioProtocol: StdioProtocol = .line
     ) {
         self.id = id
         self.name = name
@@ -59,10 +69,19 @@ final class ServerConfig {
         self.env = env
         self.isEnabled = isEnabled
         self._flattenMode = flattenMode
+        self._stdioProtocol = stdioProtocol
     }
 }
 
 enum ServerType: String, Codable {
     case http
     case stdio
+}
+
+/// stdio 服务器的通信协议
+enum StdioProtocol: String, Codable {
+    /// 按行分隔的 JSON (JSON\n) - 默认，兼容大多数 MCP server
+    case line
+    /// Content-Length header 格式 (Content-Length: N\r\n\r\nJSON) - 标准 MCP/LSP 协议
+    case contentLength
 }

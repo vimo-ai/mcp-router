@@ -1,7 +1,7 @@
 //! Stdio MCP Client - manages subprocess communication
 
 use super::ClientError;
-use crate::config::ServerConfig;
+use crate::config::{ServerConfig, StdioProtocol};
 use crate::protocol::{JsonRpcRequest, JsonRpcResponse, McpTool, McpToolsListResult, ToolCallResult};
 use parking_lot::RwLock;
 use serde_json::{json, Value};
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
@@ -128,19 +128,44 @@ impl StdioMcpClient {
         // Spawn stdout reader task
         let pending = self.pending_requests.clone();
         let name = self.config.name.clone();
+        let protocol = self.config.stdio_protocol;
+
         tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
+            let mut reader = BufReader::new(stdout);
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
+            loop {
+                let message = match protocol {
+                    StdioProtocol::Line => {
+                        // 按行读取
+                        let mut line = String::new();
+                        match reader.read_line(&mut line).await {
+                            Ok(0) => break, // EOF
+                            Ok(_) => {
+                                let trimmed = line.trim();
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                trimmed.to_string()
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    StdioProtocol::ContentLength => {
+                        // Content-Length 格式读取
+                        match read_content_length_message(&mut reader).await {
+                            Ok(Some(msg)) => msg,
+                            Ok(None) => break, // EOF
+                            Err(e) => {
+                                tracing::warn!("{} Content-Length read error: {}", name, e);
+                                continue;
+                            }
+                        }
+                    }
+                };
 
-                tracing::debug!("{} stdout: {}", name, &trimmed[..trimmed.len().min(100)]);
+                tracing::debug!("{} stdout: {}", name, &message[..message.len().min(100)]);
 
-                match serde_json::from_str::<JsonRpcResponse>(trimmed) {
+                match serde_json::from_str::<JsonRpcResponse>(&message) {
                     Ok(response) => {
                         if let Some(id) = response.id {
                             let mut pending = pending.write();
@@ -210,7 +235,15 @@ impl StdioMcpClient {
 
         let id = self.next_id();
         let request = JsonRpcRequest::new(Some(id), method, params);
-        let request_json = serde_json::to_string(&request)? + "\n";
+        let request_json = serde_json::to_string(&request)?;
+
+        // 根据协议类型格式化消息
+        let formatted_message = match self.config.stdio_protocol {
+            StdioProtocol::Line => format!("{}\n", request_json),
+            StdioProtocol::ContentLength => {
+                format!("Content-Length: {}\r\n\r\n{}", request_json.len(), request_json)
+            }
+        };
 
         // Create response channel
         let (tx, rx) = oneshot::channel();
@@ -224,7 +257,7 @@ impl StdioMcpClient {
             let stdin_tx = self.stdin_tx.read();
             if let Some(sender) = stdin_tx.as_ref() {
                 sender
-                    .send(request_json)
+                    .send(formatted_message)
                     .await
                     .map_err(|e| ClientError::Process(format!("Failed to send: {}", e)))?;
             } else {
@@ -309,4 +342,54 @@ impl Drop for StdioMcpClient {
     fn drop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);
     }
+}
+
+/// 读取 Content-Length 格式的消息
+async fn read_content_length_message<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+) -> Result<Option<String>, std::io::Error> {
+    // 1. 读取 header 直到 \r\n\r\n
+    let mut header = String::new();
+    loop {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line).await?;
+        if n == 0 {
+            return Ok(None); // EOF
+        }
+
+        header.push_str(&line);
+
+        // 检查是否到达 header 结束
+        if header.ends_with("\r\n\r\n") || header.ends_with("\n\n") {
+            break;
+        }
+    }
+
+    // 2. 解析 Content-Length
+    let content_length = header
+        .lines()
+        .find_map(|line| {
+            let lower = line.to_lowercase();
+            if lower.starts_with("content-length:") {
+                line.split(':')
+                    .nth(1)
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Missing Content-Length header",
+            )
+        })?;
+
+    // 3. 读取指定长度的内容
+    let mut content = vec![0u8; content_length];
+    reader.read_exact(&mut content).await?;
+
+    String::from_utf8(content).map(Some).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Invalid UTF-8: {}", e))
+    })
 }

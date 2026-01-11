@@ -15,6 +15,11 @@ actor ProcessManager {
     private var errorPipe: Pipe?
     private var isRunning = false
 
+    /// 使用的协议类型
+    var stdioProtocol: StdioProtocol {
+        config.stdioProtocol
+    }
+
     init(config: ServerConfig) {
         self.config = config
     }
@@ -182,33 +187,54 @@ actor ProcessManager {
 
     // MARK: - I/O Operations
 
-    /// 写入 stdin
+    /// 写入 stdin（根据协议类型选择格式）
     func write(_ data: String) async throws {
         guard let inputPipe = inputPipe else {
             throw MCPError.processNotRunning
         }
 
-        let dataWithNewline = data.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-        guard let utf8Data = dataWithNewline.data(using: .utf8) else {
+        let trimmedData = data.trimmingCharacters(in: .whitespacesAndNewlines)
+        let formattedData: String
+
+        switch stdioProtocol {
+        case .line:
+            // 按行分隔：JSON + \n
+            formattedData = trimmedData + "\n"
+        case .contentLength:
+            // Content-Length header 格式
+            let contentBytes = trimmedData.utf8.count
+            formattedData = "Content-Length: \(contentBytes)\r\n\r\n\(trimmedData)"
+        }
+
+        guard let utf8Data = formattedData.data(using: .utf8) else {
             throw MCPError.encodingError
         }
 
         try inputPipe.fileHandleForWriting.write(contentsOf: utf8Data)
     }
 
-    /// 读取 stdout (阻塞式异步读取一行)
-    func readLine() async throws -> String? {
+    /// 读取 stdout 消息（根据协议类型选择格式）
+    func readMessage() async throws -> String? {
+        print("📖 readMessage() 使用协议: \(stdioProtocol)")
+        switch stdioProtocol {
+        case .line:
+            return try await readLineMessage()
+        case .contentLength:
+            return try await readContentLengthMessage()
+        }
+    }
+
+    /// 按行读取一条消息（JSON\n 格式）
+    private func readLineMessage() async throws -> String? {
         guard let outputPipe = outputPipe else {
             throw MCPError.processNotRunning
         }
 
-        // 使用 FileHandle.bytes 异步读取
         let handle = outputPipe.fileHandleForReading
         var buffer = Data()
 
         for try await byte in handle.bytes {
             if byte == UInt8(ascii: "\n") {
-                // 读到换行符
                 if let line = String(data: buffer, encoding: .utf8) {
                     return line
                 }
@@ -218,8 +244,80 @@ actor ProcessManager {
             }
         }
 
-        // 进程已关闭
         return nil
+    }
+
+    /// 读取 Content-Length 格式的消息
+    private func readContentLengthMessage() async throws -> String? {
+        guard let outputPipe = outputPipe else {
+            throw MCPError.processNotRunning
+        }
+
+        let handle = outputPipe.fileHandleForReading
+
+        // 使用同步读取方式，避免 AsyncBytes 的多次迭代问题
+        // 1. 读取 header 直到 \r\n\r\n
+        var headerBuffer = Data()
+        let headerEnd = Data([0x0D, 0x0A, 0x0D, 0x0A]) // \r\n\r\n
+
+        while true {
+            let byte = handle.availableData
+            if byte.isEmpty {
+                // 等待数据
+                try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+                continue
+            }
+            headerBuffer.append(byte)
+
+            // 检查是否包含 \r\n\r\n
+            if let range = headerBuffer.range(of: headerEnd) {
+                // 找到 header 结束位置
+                let headerEndIndex = range.upperBound
+
+                // 2. 解析 Content-Length
+                let headerData = headerBuffer[..<range.lowerBound]
+                guard let headerString = String(data: headerData, encoding: .utf8) else {
+                    print("⚠️ Content-Length 协议: header 解析失败")
+                    return nil
+                }
+
+                // 匹配 Content-Length: N
+                guard let match = headerString.range(of: #"Content-Length:\s*(\d+)"#, options: .regularExpression),
+                      let lengthString = headerString[match].split(separator: ":").last?.trimmingCharacters(in: .whitespaces),
+                      let contentLength = Int(lengthString) else {
+                    print("⚠️ Content-Length 协议: 未找到有效的 Content-Length header")
+                    print("   收到的 header: \(headerString.prefix(100))")
+                    return nil
+                }
+
+                // 3. 读取内容（可能 headerBuffer 中已经包含部分内容）
+                var contentBuffer = headerBuffer[headerEndIndex...]
+
+                while contentBuffer.count < contentLength {
+                    let moreData = handle.availableData
+                    if moreData.isEmpty {
+                        try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+                        continue
+                    }
+                    contentBuffer.append(moreData)
+                }
+
+                // 只取需要的长度
+                let contentData = contentBuffer.prefix(contentLength)
+                guard let content = String(data: contentData, encoding: .utf8) else {
+                    print("⚠️ Content-Length 协议: 内容解析失败")
+                    return nil
+                }
+
+                return content
+            }
+        }
+    }
+
+    /// 兼容旧 API：按行读取（不推荐，使用 readMessage() 代替）
+    @available(*, deprecated, renamed: "readMessage", message: "Use readMessage() instead for protocol-aware reading")
+    func readLine() async throws -> String? {
+        return try await readLineMessage()
     }
 
     /// 读取 stderr (非阻塞)

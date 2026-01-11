@@ -93,29 +93,29 @@ actor StdioMCPClient {
         outputReaderTask = Task {
             while !Task.isCancelled {
                 do {
-                    // 读取一行
-                    guard let line = try await processManager.readLine() else {
+                    // 根据协议类型读取消息
+                    guard let message = try await processManager.readMessage() else {
                         // 进程已关闭
                         print("📤 进程已关闭,停止读取: \(config.name)")
                         break
                     }
 
-                    // 跳过空行
-                    let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmedLine.isEmpty {
+                    // 跳过空消息
+                    let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmedMessage.isEmpty {
                         continue
                     }
 
-                    print("📥 收到输出: \(trimmedLine.prefix(100))")
+                    print("📥 收到输出: \(trimmedMessage.prefix(100))")
 
                     // 解析 JSON-RPC 响应
-                    if let data = trimmedLine.data(using: .utf8) {
+                    if let data = trimmedMessage.data(using: .utf8) {
                         do {
                             let response = try JSONDecoder().decode(JSONRPCResponse.self, from: data)
                             await requestMatcher.handleResponse(response)
                         } catch {
                             print("⚠️ 解析响应失败: \(error)")
-                            print("   原始数据: \(trimmedLine)")
+                            print("   原始数据: \(trimmedMessage)")
                         }
                     }
                 } catch {

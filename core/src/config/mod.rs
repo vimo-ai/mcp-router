@@ -15,6 +15,17 @@ pub enum ServerType {
     Stdio,
 }
 
+/// Stdio protocol type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum StdioProtocol {
+    /// Line-delimited JSON (JSON\n) - default
+    #[default]
+    Line,
+    /// Content-Length header format (standard MCP/LSP protocol)
+    ContentLength,
+}
+
 /// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -41,6 +52,10 @@ pub struct ServerConfig {
     pub args: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+
+    // Stdio protocol type
+    #[serde(default)]
+    pub stdio_protocol: StdioProtocol,
 }
 
 impl ServerConfig {
@@ -56,6 +71,7 @@ impl ServerConfig {
             command: None,
             args: Vec::new(),
             env: HashMap::new(),
+            stdio_protocol: StdioProtocol::default(),
         }
     }
 
@@ -75,6 +91,7 @@ impl ServerConfig {
             command: Some(command.into()),
             args,
             env: HashMap::new(),
+            stdio_protocol: StdioProtocol::default(),
         }
     }
 
@@ -90,6 +107,11 @@ impl ServerConfig {
 
     pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
         self.env = env;
+        self
+    }
+
+    pub fn with_stdio_protocol(mut self, protocol: StdioProtocol) -> Self {
+        self.stdio_protocol = protocol;
         self
     }
 }

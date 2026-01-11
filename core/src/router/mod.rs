@@ -2,7 +2,7 @@
 //!
 //! Manages multiple MCP servers and provides unified interface
 
-mod meta_tools;
+pub mod meta_tools;
 
 use crate::client::{HttpMcpClient, StdioMcpClient};
 use crate::config::{ServerConfig, ServerType, Workspace};
@@ -121,6 +121,13 @@ impl McpRouter {
     pub fn set_server_flatten_mode(&mut self, name: &str, flatten: bool) {
         if let Some(config) = self.server_configs.iter_mut().find(|c| c.name == name) {
             config.flatten_mode = flatten;
+        }
+    }
+
+    /// Update server description
+    pub fn set_server_description(&mut self, name: &str, description: &str) {
+        if let Some(config) = self.server_configs.iter_mut().find(|c| c.name == name) {
+            config.description = description.to_string();
         }
     }
 

@@ -208,14 +208,58 @@ async fn process_request(
                 let tool_name = tool_params.name.clone();
                 let arguments = tool_params.arguments.clone();
                 let workspace_clone = workspace.clone();
-                tokio::task::block_in_place(|| {
-                    let router = router_clone.read();
-                    tokio::runtime::Handle::current().block_on(router.handle_router_tool_call(
+
+                // Check if it's a management tool (requires write access)
+                if crate::router::meta_tools::is_management_tool(&tool_name) {
+                    let mut router = router_clone.write();
+                    crate::router::meta_tools::handle_management_tool_call(
+                        &mut router,
                         &tool_name,
                         arguments,
-                        workspace_clone.as_ref(),
-                    ))
-                })
+                    )
+                } else {
+                    let result = tokio::task::block_in_place(|| {
+                        let router = router_clone.read();
+                        tokio::runtime::Handle::current().block_on(router.handle_router_tool_call(
+                            &tool_name,
+                            arguments,
+                            workspace_clone.as_ref(),
+                        ))
+                    });
+
+                    // Handle forward to meta tool (AI called mcp_router__call with wrong format)
+                    match &result {
+                        Err(e) if e.code == crate::router::meta_tools::FORWARD_TO_META_TOOL => {
+                            if let Some(data) = &e.data {
+                                let forward_tool = data.get("forward_tool").and_then(|v| v.as_str());
+                                let forward_args = data.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+
+                                if let Some(tool_name) = forward_tool {
+                                    if crate::router::meta_tools::is_management_tool(tool_name) {
+                                        let mut router = router_clone.write();
+                                        crate::router::meta_tools::handle_management_tool_call(
+                                            &mut router,
+                                            tool_name,
+                                            forward_args,
+                                        )
+                                    } else {
+                                        tokio::task::block_in_place(|| {
+                                            let router = router_clone.read();
+                                            tokio::runtime::Handle::current().block_on(
+                                                router.handle_router_tool_call(tool_name, forward_args, workspace_clone.as_ref())
+                                            )
+                                        })
+                                    }
+                                } else {
+                                    result
+                                }
+                            } else {
+                                result
+                            }
+                        }
+                        _ => result,
+                    }
+                }
             } else {
                 // Resolve tool path and call
                 let router = state.router.read();

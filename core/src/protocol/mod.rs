@@ -81,6 +81,14 @@ impl JsonRpcError {
         }
     }
 
+    pub fn new_with_data(code: i32, message: impl Into<String>, data: Value) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            data: Some(data),
+        }
+    }
+
     // Standard JSON-RPC error codes
     pub fn parse_error() -> Self {
         Self::new(-32700, "Parse error")

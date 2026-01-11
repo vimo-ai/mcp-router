@@ -241,7 +241,8 @@ extension ServerConfig {
             args: args,
             env: env,
             is_enabled: isEnabled,
-            flatten_mode: flattenMode
+            flatten_mode: flattenMode,
+            stdio_protocol: stdioProtocol.rawValue
         )
     }
 }
@@ -258,4 +259,5 @@ struct RustServerConfig: Encodable {
     let env: [String: String]
     let is_enabled: Bool
     let flatten_mode: Bool
+    let stdio_protocol: String  // "line" or "contentLength"
 }

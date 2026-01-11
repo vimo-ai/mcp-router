@@ -361,17 +361,18 @@ final class MCPRouter: ObservableObject {
                 - command: Command to run, for stdio type (required for stdio)
                 - args: Command arguments array, for stdio type (optional)
                 - env: Environment variables object, for stdio type (optional)
+                - stdioProtocol: "line" or "contentLength", for stdio type (optional, default: "line")
                 - url: Server URL, for http type (required for http)
                 - headers: HTTP headers object, for http type (optional)
                 - flattenMode: Whether to flatten tools (default: false)
 
-                Example (stdio):
+                Example (stdio with Content-Length protocol for LSP):
                 {
-                  "name": "filesystem",
+                  "name": "lsp",
                   "type": "stdio",
-                  "description": "File system access",
-                  "command": "npx",
-                  "args": ["-y", "@anthropic/mcp-server-filesystem", "/path/to/dir"]
+                  "command": "node",
+                  "args": ["/path/to/lsp-server.js"],
+                  "stdioProtocol": "contentLength"
                 }
 
                 Example (http):
@@ -411,6 +412,11 @@ final class MCPRouter: ObservableObject {
                             "type": "object",
                             "additionalProperties": ["type": "string"],
                             "description": "Environment variables (for stdio type)"
+                        ] as [String: Any],
+                        "stdioProtocol": [
+                            "type": "string",
+                            "enum": ["line", "contentLength"],
+                            "description": "Protocol for stdio: 'line' (default) or 'contentLength' (for LSP/standard MCP)"
                         ] as [String: Any],
                         "url": [
                             "type": "string",
@@ -1017,6 +1023,14 @@ final class MCPRouter: ObservableObject {
         let headers = arguments["headers"]?.value as? [String: String] ?? [:]
         let flattenMode = arguments["flattenMode"]?.value as? Bool ?? false
 
+        // 解析 stdioProtocol 参数
+        let stdioProtocol: StdioProtocol
+        if let protocolStr = arguments["stdioProtocol"]?.value as? String {
+            stdioProtocol = protocolStr == "contentLength" ? .contentLength : .line
+        } else {
+            stdioProtocol = .line
+        }
+
         let newServer = ServerConfig(
             name: name,
             type: serverType,
@@ -1027,7 +1041,8 @@ final class MCPRouter: ObservableObject {
             args: args,
             env: env,
             isEnabled: true,
-            flattenMode: flattenMode
+            flattenMode: flattenMode,
+            stdioProtocol: stdioProtocol
         )
 
         context.insert(newServer)

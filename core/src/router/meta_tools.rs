@@ -1,9 +1,10 @@
 //! Meta tools implementation (mcp_router__*)
 
 use super::McpRouter;
-use crate::config::Workspace;
+use crate::config::{ServerConfig, ServerType, StdioProtocol, Workspace};
 use crate::protocol::{JsonRpcError, McpTool, ToolCallResult};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// Generate meta tools for the router
 pub fn generate_meta_tools(
@@ -134,6 +135,7 @@ Parameters:
 - command: Command to run, for stdio type (required for stdio)
 - args: Command arguments array, for stdio type (optional)
 - env: Environment variables object, for stdio type (optional)
+- stdioProtocol: "line" or "contentLength", for stdio type (optional, default: "line")
 - url: Server URL, for http type (required for http)
 - headers: HTTP headers object, for http type (optional)
 - flattenMode: Whether to flatten tools (default: false)"#
@@ -147,6 +149,7 @@ Parameters:
                     "command": { "type": "string" },
                     "args": { "type": "array", "items": { "type": "string" } },
                     "env": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "stdioProtocol": { "type": "string", "enum": ["line", "contentLength"], "description": "Protocol for stdio communication. 'line' for line-delimited JSON, 'contentLength' for Content-Length header format (standard MCP/LSP)" },
                     "url": { "type": "string" },
                     "headers": { "type": "object", "additionalProperties": { "type": "string" } },
                     "flattenMode": { "type": "boolean" }
@@ -197,7 +200,15 @@ Only provided fields will be updated."#
     ]
 }
 
-/// Handle meta tool call
+/// Check if a tool name is a management tool (requires mutable access)
+pub fn is_management_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "mcp_router__add_server" | "mcp_router__remove_server" | "mcp_router__update_server"
+    )
+}
+
+/// Handle meta tool call (read-only operations)
 pub async fn handle_meta_tool_call(
     router: &McpRouter,
     name: &str,
@@ -209,6 +220,20 @@ pub async fn handle_meta_tool_call(
         "mcp_router__list_tools" => handle_list_tools(router, arguments, workspace).await,
         "mcp_router__describe" => handle_describe(router, arguments, workspace).await,
         "mcp_router__call" => handle_call(router, arguments, workspace).await,
+        _ => Err(JsonRpcError::method_not_found(name)),
+    }
+}
+
+/// Handle management tool call (requires mutable access)
+pub fn handle_management_tool_call(
+    router: &mut McpRouter,
+    name: &str,
+    arguments: Value,
+) -> Result<ToolCallResult, JsonRpcError> {
+    match name {
+        "mcp_router__add_server" => handle_add_server(router, arguments),
+        "mcp_router__remove_server" => handle_remove_server(router, arguments),
+        "mcp_router__update_server" => handle_update_server(router, arguments),
         _ => Err(JsonRpcError::method_not_found(name)),
     }
 }
@@ -334,6 +359,10 @@ async fn handle_describe(
     Ok(ToolCallResult::text(lines.join("\n")))
 }
 
+/// Error code indicating a forward to meta tool is needed
+/// Using -32000 (server-defined error range: -32000 to -32099)
+pub const FORWARD_TO_META_TOOL: i32 = -32000;
+
 async fn handle_call(
     router: &McpRouter,
     arguments: Value,
@@ -351,7 +380,221 @@ async fn handle_call(
 
     let (server_name, tool_name) = router.resolve_tool_path(tool_path, workspace)?;
 
+    // Detect misuse: AI called mcp_router__call with "mcp-router__mcp_router__xxx" format
+    // This should be forwarded to the actual meta tool
+    if server_name == "mcp-router" && tool_name.starts_with("mcp_router__") {
+        // Return special error to signal forwarding needed
+        // The error data contains the actual tool name to forward to
+        return Err(JsonRpcError::new_with_data(
+            FORWARD_TO_META_TOOL,
+            format!("Forward to meta tool: {}", tool_name),
+            json!({ "forward_tool": tool_name, "arguments": tool_args }),
+        ));
+    }
+
     router
         .call_tool(&server_name, &tool_name, tool_args, workspace)
         .await
+}
+
+// MARK: - Management Tool Handlers
+
+fn handle_add_server(
+    router: &mut McpRouter,
+    arguments: Value,
+) -> Result<ToolCallResult, JsonRpcError> {
+    let name = arguments
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError::invalid_params("Missing 'name' parameter"))?;
+
+    let server_type_str = arguments
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError::invalid_params("Missing 'type' parameter"))?;
+
+    let server_type = match server_type_str {
+        "http" => ServerType::Http,
+        "stdio" => ServerType::Stdio,
+        _ => {
+            return Err(JsonRpcError::invalid_params(
+                "Invalid 'type': must be 'http' or 'stdio'",
+            ))
+        }
+    };
+
+    let description = arguments
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let flatten_mode = arguments
+        .get("flattenMode")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let config = match server_type {
+        ServerType::Http => {
+            let url = arguments
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    JsonRpcError::invalid_params("Missing 'url' parameter for http type")
+                })?;
+
+            let headers: HashMap<String, String> = arguments
+                .get("headers")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            ServerConfig {
+                name: name.to_string(),
+                server_type: ServerType::Http,
+                description,
+                is_enabled: true,
+                flatten_mode,
+                url: Some(url.to_string()),
+                headers,
+                command: None,
+                args: Vec::new(),
+                env: HashMap::new(),
+                stdio_protocol: StdioProtocol::default(),
+            }
+        }
+        ServerType::Stdio => {
+            let command = arguments
+                .get("command")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    JsonRpcError::invalid_params("Missing 'command' parameter for stdio type")
+                })?;
+
+            let args: Vec<String> = arguments
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let env: HashMap<String, String> = arguments
+                .get("env")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // 解析 stdio_protocol 参数
+            let stdio_protocol = arguments
+                .get("stdioProtocol")
+                .and_then(|v| v.as_str())
+                .map(|s| match s {
+                    "contentLength" => StdioProtocol::ContentLength,
+                    _ => StdioProtocol::Line,
+                })
+                .unwrap_or_default();
+
+            ServerConfig {
+                name: name.to_string(),
+                server_type: ServerType::Stdio,
+                description,
+                is_enabled: true,
+                flatten_mode,
+                url: None,
+                headers: HashMap::new(),
+                command: Some(command.to_string()),
+                args,
+                env,
+                stdio_protocol,
+            }
+        }
+    };
+
+    router.add_server(config);
+
+    Ok(ToolCallResult::text(format!(
+        "Successfully added server '{}' (type: {})",
+        name, server_type_str
+    )))
+}
+
+fn handle_remove_server(
+    router: &mut McpRouter,
+    arguments: Value,
+) -> Result<ToolCallResult, JsonRpcError> {
+    let name = arguments
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError::invalid_params("Missing 'name' parameter"))?;
+
+    if router.remove_server(name) {
+        Ok(ToolCallResult::text(format!(
+            "Successfully removed server '{}'",
+            name
+        )))
+    } else {
+        Err(JsonRpcError::new(
+            -32602,
+            format!("Server '{}' not found", name),
+        ))
+    }
+}
+
+fn handle_update_server(
+    router: &mut McpRouter,
+    arguments: Value,
+) -> Result<ToolCallResult, JsonRpcError> {
+    let name = arguments
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError::invalid_params("Missing 'name' parameter"))?;
+
+    // Check if server exists
+    if !router.server_configs().iter().any(|c| c.name == name) {
+        return Err(JsonRpcError::new(
+            -32602,
+            format!("Server '{}' not found", name),
+        ));
+    }
+
+    let mut updates = Vec::new();
+
+    if let Some(enabled) = arguments.get("enabled").and_then(|v| v.as_bool()) {
+        router.set_server_enabled(name, enabled);
+        updates.push(format!("enabled={}", enabled));
+    }
+
+    if let Some(flatten) = arguments.get("flattenMode").and_then(|v| v.as_bool()) {
+        router.set_server_flatten_mode(name, flatten);
+        updates.push(format!("flattenMode={}", flatten));
+    }
+
+    if let Some(description) = arguments.get("description").and_then(|v| v.as_str()) {
+        router.set_server_description(name, description);
+        updates.push(format!("description=\"{}\"", description));
+    }
+
+    if updates.is_empty() {
+        Ok(ToolCallResult::text(format!(
+            "No updates provided for server '{}'",
+            name
+        )))
+    } else {
+        Ok(ToolCallResult::text(format!(
+            "Successfully updated server '{}': {}",
+            name,
+            updates.join(", ")
+        )))
+    }
 }

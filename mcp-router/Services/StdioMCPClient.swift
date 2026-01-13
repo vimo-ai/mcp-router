@@ -27,19 +27,46 @@ actor StdioMCPClient {
         // 启动进程
         try await processManager.start()
 
-        // 启动 stdout 读取任务
+        // 等待进程准备好
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        // 先启动读取任务（但它会立即开始等待数据）
         startOutputReader()
 
-        // 等待进程准备好
-        try await Task.sleep(nanoseconds: 500_000_000)
+        // 给读取任务一点时间启动
+        try await Task.sleep(nanoseconds: 100_000_000)
 
-        print("✅ StdioMCPClient 启动完成: \(config.name)")
+        // 执行 MCP initialize 握手
+        try await performInitialize()
+    }
+
+    /// 执行 MCP initialize 握手
+    private func performInitialize() async throws {
+        // 1. 发送 initialize 请求
+        let initParams: [String: AnyCodable] = [
+            "protocolVersion": AnyCodable("2024-11-05"),
+            "capabilities": AnyCodable([:] as [String: Any]),
+            "clientInfo": AnyCodable([
+                "name": "mcp-router",
+                "version": "1.0.0"
+            ] as [String: Any])
+        ]
+
+        let result = try await requestMatcher.sendRequest(
+            processManager: processManager,
+            method: "initialize",
+            params: initParams
+        )
+
+        // 2. 发送 initialized 通知
+        let notification = """
+        {"jsonrpc":"2.0","method":"notifications/initialized"}
+        """
+        try await processManager.write(notification)
     }
 
     /// 停止客户端
     func stop() async {
-        print("🛑 停止 StdioMCPClient: \(config.name)")
-
         outputReaderTask?.cancel()
         await requestMatcher.cancelAll()
         await processManager.stop()
@@ -68,7 +95,6 @@ actor StdioMCPClient {
         let toolsResult = try JSONDecoder().decode(MCPToolsListResult.self, from: toolsData)
 
         toolsCache = toolsResult.tools
-        print("✅ \(config.name): 成功加载 \(toolsResult.tools.count) 个工具")
         return toolsResult.tools
     }
 
@@ -96,7 +122,6 @@ actor StdioMCPClient {
                     // 根据协议类型读取消息
                     guard let message = try await processManager.readMessage() else {
                         // 进程已关闭
-                        print("📤 进程已关闭,停止读取: \(config.name)")
                         break
                     }
 
@@ -106,27 +131,18 @@ actor StdioMCPClient {
                         continue
                     }
 
-                    print("📥 收到输出: \(trimmedMessage.prefix(100))")
-
                     // 解析 JSON-RPC 响应
                     if let data = trimmedMessage.data(using: .utf8) {
-                        do {
-                            let response = try JSONDecoder().decode(JSONRPCResponse.self, from: data)
-                            await requestMatcher.handleResponse(response)
-                        } catch {
-                            print("⚠️ 解析响应失败: \(error)")
-                            print("   原始数据: \(trimmedMessage)")
+                        try? JSONDecoder().decode(JSONRPCResponse.self, from: data).map { response in
+                            Task { await requestMatcher.handleResponse(response) }
                         }
                     }
                 } catch {
                     if !Task.isCancelled {
-                        print("❌ 读取 stdout 失败: \(error)")
+                        break
                     }
-                    break
                 }
             }
-
-            print("📤 stdout 读取任务已停止: \(config.name)")
         }
     }
 }

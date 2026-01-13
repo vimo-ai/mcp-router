@@ -425,6 +425,14 @@ impl McpRouter {
     pub fn server_configs(&self) -> &[ServerConfig] {
         &self.server_configs
     }
+
+    /// Get all workspaces as a vector
+    pub fn workspaces(&self) -> Vec<Workspace> {
+        self.workspaces
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
+    }
 }
 
 impl Default for McpRouter {

@@ -247,7 +247,7 @@ actor ProcessManager {
         return nil
     }
 
-    /// 读取 Content-Length 格式的消息
+    /// 读取 Content-Length 格式的消息（使用 AsyncBytes 逐字节读取）
     private func readContentLengthMessage() async throws -> String? {
         guard let outputPipe = outputPipe else {
             throw MCPError.processNotRunning
@@ -255,63 +255,62 @@ actor ProcessManager {
 
         let handle = outputPipe.fileHandleForReading
 
-        // 使用同步读取方式，避免 AsyncBytes 的多次迭代问题
-        // 1. 读取 header 直到 \r\n\r\n
+        // 1. 逐字节读取 header 直到 \r\n\r\n
         var headerBuffer = Data()
-        let headerEnd = Data([0x0D, 0x0A, 0x0D, 0x0A]) // \r\n\r\n
+        let headerEndSequence: [UInt8] = [0x0D, 0x0A, 0x0D, 0x0A] // \r\n\r\n
+        var matchIndex = 0
 
-        while true {
-            let byte = handle.availableData
-            if byte.isEmpty {
-                // 等待数据
-                try await Task.sleep(nanoseconds: 10_000_000) // 10ms
-                continue
-            }
+        for try await byte in handle.bytes {
             headerBuffer.append(byte)
 
-            // 检查是否包含 \r\n\r\n
-            if let range = headerBuffer.range(of: headerEnd) {
-                // 找到 header 结束位置
-                let headerEndIndex = range.upperBound
-
-                // 2. 解析 Content-Length
-                let headerData = headerBuffer[..<range.lowerBound]
-                guard let headerString = String(data: headerData, encoding: .utf8) else {
-                    print("⚠️ Content-Length 协议: header 解析失败")
-                    return nil
+            // 匹配 \r\n\r\n 序列
+            if byte == headerEndSequence[matchIndex] {
+                matchIndex += 1
+                if matchIndex == headerEndSequence.count {
+                    // 找到 header 结束
+                    break
                 }
-
-                // 匹配 Content-Length: N
-                guard let match = headerString.range(of: #"Content-Length:\s*(\d+)"#, options: .regularExpression),
-                      let lengthString = headerString[match].split(separator: ":").last?.trimmingCharacters(in: .whitespaces),
-                      let contentLength = Int(lengthString) else {
-                    print("⚠️ Content-Length 协议: 未找到有效的 Content-Length header")
-                    print("   收到的 header: \(headerString.prefix(100))")
-                    return nil
-                }
-
-                // 3. 读取内容（可能 headerBuffer 中已经包含部分内容）
-                var contentBuffer = headerBuffer[headerEndIndex...]
-
-                while contentBuffer.count < contentLength {
-                    let moreData = handle.availableData
-                    if moreData.isEmpty {
-                        try await Task.sleep(nanoseconds: 10_000_000) // 10ms
-                        continue
-                    }
-                    contentBuffer.append(moreData)
-                }
-
-                // 只取需要的长度
-                let contentData = contentBuffer.prefix(contentLength)
-                guard let content = String(data: contentData, encoding: .utf8) else {
-                    print("⚠️ Content-Length 协议: 内容解析失败")
-                    return nil
-                }
-
-                return content
+            } else {
+                matchIndex = (byte == headerEndSequence[0]) ? 1 : 0
             }
         }
+
+        // 2. 解析 Content-Length
+        // 移除尾部的 \r\n\r\n
+        let headerData = headerBuffer.dropLast(4)
+        guard let headerString = String(data: headerData, encoding: .utf8) else {
+            print("⚠️ Content-Length 协议: header 解析失败")
+            return nil
+        }
+
+        // 匹配 Content-Length: N
+        guard let match = headerString.range(of: #"Content-Length:\s*(\d+)"#, options: .regularExpression),
+              let lengthString = headerString[match].split(separator: ":").last?.trimmingCharacters(in: .whitespaces),
+              let contentLength = Int(lengthString) else {
+            print("⚠️ Content-Length 协议: 未找到有效的 Content-Length header")
+            print("   收到的 header: \(headerString.prefix(100))")
+            return nil
+        }
+
+        // 3. 读取指定长度的内容
+        var contentBuffer = Data()
+        contentBuffer.reserveCapacity(contentLength)
+
+        var bytesRead = 0
+        for try await byte in handle.bytes {
+            contentBuffer.append(byte)
+            bytesRead += 1
+            if bytesRead >= contentLength {
+                break
+            }
+        }
+
+        guard let content = String(data: contentBuffer, encoding: .utf8) else {
+            print("⚠️ Content-Length 协议: 内容解析失败")
+            return nil
+        }
+
+        return content
     }
 
     /// 兼容旧 API：按行读取（不推荐，使用 readMessage() 代替）

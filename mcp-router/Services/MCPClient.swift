@@ -57,7 +57,9 @@ actor MCPClient {
         case .http:
             return try await sendHTTPRequest(method: method, params: params)
         case .stdio:
-            throw MCPError.unsupportedServerType("stdio not yet implemented")
+            // MCPClient 仅用于 HTTP 类型
+            // stdio 类型应使用 StdioMCPClient（通过 WorkspaceProcessPool 管理）
+            throw MCPError.unsupportedServerType("MCPClient does not support stdio. Use StdioMCPClient instead.")
         }
     }
 

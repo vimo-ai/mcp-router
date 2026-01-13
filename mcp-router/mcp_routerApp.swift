@@ -11,6 +11,174 @@ import AppKit
 import Sparkle
 import Combine
 
+// MARK: - Data Migrator
+
+/// 数据迁移器：从 SwiftData 迁移到 JSON 文件
+/// 用于支持 MCPRouterKit（通过 FFI）和独立 App 之间的数据共享
+struct DataMigrator {
+    static let configDir = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".vimo")
+        .appendingPathComponent("mcp-router")
+
+    static let settingsFile = configDir.appendingPathComponent("settings.json")
+    static let workspacesFile = configDir.appendingPathComponent("workspaces.json")
+    static let serversFile = configDir.appendingPathComponent("servers.json")
+
+    /// 按文件检查是否需要迁移
+    static var needsMigrateSettings: Bool {
+        !FileManager.default.fileExists(atPath: settingsFile.path)
+    }
+
+    static var needsMigrateWorkspaces: Bool {
+        !FileManager.default.fileExists(atPath: workspacesFile.path)
+    }
+
+    static var needsMigrateServers: Bool {
+        !FileManager.default.fileExists(atPath: serversFile.path)
+    }
+
+    /// 执行迁移（按需迁移各个文件）
+    @MainActor
+    static func migrate(from context: ModelContext) {
+        let needsAnyMigration = needsMigrateSettings || needsMigrateWorkspaces || needsMigrateServers
+
+        guard needsAnyMigration else {
+            print("✅ 所有配置文件已存在，跳过迁移")
+            return
+        }
+
+        print("🔄 开始从 SwiftData 迁移数据...")
+
+        do {
+            // 确保目录存在
+            try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+
+            // 按需迁移各个文件
+            if needsMigrateSettings {
+                migrateSettings(from: context)
+            } else {
+                print("   ⏭️ settings.json 已存在，跳过")
+            }
+
+            if needsMigrateWorkspaces {
+                migrateWorkspaces(from: context)
+            } else {
+                print("   ⏭️ workspaces.json 已存在，跳过")
+            }
+
+            if needsMigrateServers {
+                migrateServers(from: context)
+            } else {
+                print("   ⏭️ servers.json 已存在，跳过")
+            }
+
+            print("✅ 数据迁移完成")
+        } catch {
+            print("❌ 数据迁移失败: \(error)")
+        }
+    }
+
+    @MainActor
+    private static func migrateSettings(from context: ModelContext) {
+        let descriptor = FetchDescriptor<AppSettings>()
+        guard let settings = try? context.fetch(descriptor).first else {
+            print("   ⚠️ 未找到 AppSettings，使用默认值")
+            return
+        }
+
+        // 创建 JSON 格式
+        let jsonSettings: [String: Any] = [
+            "server_port": settings.serverPort,
+            "expose_management_tools": settings.exposeManagementTools
+        ]
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: jsonSettings, options: .prettyPrinted)
+            try data.write(to: settingsFile)
+            print("   ✅ Settings 已迁移: port=\(settings.serverPort), fullMode=\(settings.exposeManagementTools)")
+        } catch {
+            print("   ❌ Settings 迁移失败: \(error)")
+        }
+    }
+
+    @MainActor
+    private static func migrateWorkspaces(from context: ModelContext) {
+        let descriptor = FetchDescriptor<Workspace>(sortBy: [SortDescriptor(\.createdAt)])
+        guard let workspaces = try? context.fetch(descriptor), !workspaces.isEmpty else {
+            print("   ⚠️ 未找到 Workspaces，跳过")
+            return
+        }
+
+        // 转换为 JSON 格式
+        var jsonWorkspaces: [[String: Any]] = []
+        for ws in workspaces {
+            var dict: [String: Any] = [
+                "token": ws.token,
+                "name": ws.name,
+                "is_default": ws.isDefault,
+                "server_overrides": ws.serverOverrides,
+                "flatten_overrides": ws.flattenOverrides
+            ]
+            if let projectPath = ws.projectPath {
+                dict["project_path"] = projectPath
+            }
+            jsonWorkspaces.append(dict)
+        }
+
+        let jsonRoot: [String: Any] = ["workspaces": jsonWorkspaces]
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: jsonRoot, options: .prettyPrinted)
+            try data.write(to: workspacesFile)
+            print("   ✅ Workspaces 已迁移: \(workspaces.count) 个")
+        } catch {
+            print("   ❌ Workspaces 迁移失败: \(error)")
+        }
+    }
+
+    @MainActor
+    private static func migrateServers(from context: ModelContext) {
+        let descriptor = FetchDescriptor<ServerConfig>(sortBy: [SortDescriptor(\.name)])
+        guard let servers = try? context.fetch(descriptor), !servers.isEmpty else {
+            print("   ⚠️ 未找到 Servers，跳过")
+            return
+        }
+
+        // 转换为 JSON 格式
+        var jsonServers: [[String: Any]] = []
+        for server in servers {
+            var dict: [String: Any] = [
+                "name": server.name,
+                "type": server.type.rawValue,
+                "description": server.serverDescription,
+                "is_enabled": server.isEnabled,
+                "flatten_mode": server.flattenMode,
+                "headers": server.headers,
+                "args": server.args,
+                "env": server.env,
+                "stdio_protocol": server.stdioProtocol.rawValue
+            ]
+            if let url = server.url {
+                dict["url"] = url
+            }
+            if let command = server.command {
+                dict["command"] = command
+            }
+            jsonServers.append(dict)
+        }
+
+        let jsonRoot: [String: Any] = ["servers": jsonServers]
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: jsonRoot, options: .prettyPrinted)
+            try data.write(to: serversFile)
+            print("   ✅ Servers 已迁移: \(servers.count) 个")
+        } catch {
+            print("   ❌ Servers 迁移失败: \(error)")
+        }
+    }
+}
+
 @main
 struct mcp_routerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -139,15 +307,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var appSettings: AppSettings?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 0. 初始化应用设置
+        // 0. 执行数据迁移（从 SwiftData 到 JSON）
+        if let container = Self.sharedModelContainer {
+            DataMigrator.migrate(from: container.mainContext)
+        }
+
+        // 0.5 初始化应用设置
         initializeAppSettings()
 
-        // 0.5 注入 ModelContainer 到 Router（启用动态 Server 管理）
+        // 1. 注入 ModelContainer 到 Router（启用动态 Server 管理）
         if let container = Self.sharedModelContainer {
             router.setModelContainer(container)
         }
 
-        // 1. 初始化默认 Servers 和 Default Workspace
+        // 2. 初始化默认 Servers 和 Default Workspace
         initializeDefaultServers()
         initializeDefaultWorkspace()
 

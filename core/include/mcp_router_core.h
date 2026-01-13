@@ -90,7 +90,7 @@ char *mcp_router_list_servers(struct McpRouterHandle *handle);
 bool mcp_router_remove_server(struct McpRouterHandle *handle, const char *name, char **out_error);
 
 /**
- * Set server enabled/disabled
+ * Set server enabled/disabled and persist to servers.json
  */
 bool mcp_router_set_server_enabled(struct McpRouterHandle *handle,
                                    const char *name,
@@ -98,7 +98,7 @@ bool mcp_router_set_server_enabled(struct McpRouterHandle *handle,
                                    char **out_error);
 
 /**
- * Set server flatten mode
+ * Set server flatten mode and persist to servers.json
  */
 bool mcp_router_set_server_flatten_mode(struct McpRouterHandle *handle,
                                         const char *name,
@@ -186,5 +186,94 @@ bool mcp_router_list_tools_async(struct McpRouterHandle *handle,
                                  McpToolCallback callback,
                                  void *context,
                                  char **out_error);
+
+/**
+ * Load settings from ~/.vimo/mcp-router/settings.json
+ * Returns JSON string on success (caller must free), null on failure
+ */
+char *mcp_router_load_settings(char **out_error);
+
+/**
+ * Save settings to ~/.vimo/mcp-router/settings.json
+ */
+bool mcp_router_save_settings(const char *json, char **out_error);
+
+/**
+ * Load workspaces from ~/.vimo/mcp-router/workspaces.json into router
+ */
+bool mcp_router_load_workspaces_from_file(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Save workspaces from router to ~/.vimo/mcp-router/workspaces.json
+ */
+bool mcp_router_save_workspaces_to_file(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.claude.json
+ */
+bool mcp_router_is_installed_to_claude_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.claude.json
+ */
+bool mcp_router_install_to_claude_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.claude.json
+ */
+bool mcp_router_uninstall_from_claude_global(char **out_error);
+
+/**
+ * Load servers from ~/.claude.json into router
+ */
+bool mcp_router_load_servers_from_claude_config(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Load servers from ~/.vimo/mcp-router/servers.json into router (appends to existing)
+ */
+bool mcp_router_load_servers_from_router_config(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Load servers from ~/.vimo/mcp-router/servers.json
+ * Also auto-migrates from SwiftData if servers.json doesn't exist
+ * NOTE: ~/.claude.json is NOT read here - Claude Code reads it directly
+ */
+bool mcp_router_load_all_servers(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Add server to both router and config file
+ * target: "global" or "project:/path/to/project"
+ */
+bool mcp_router_add_server_and_persist(struct McpRouterHandle *handle,
+                                       const char *json,
+                                       const char *target,
+                                       char **out_error);
+
+/**
+ * Remove server from both router and config file
+ */
+bool mcp_router_remove_server_and_persist(struct McpRouterHandle *handle,
+                                          const char *name,
+                                          const char *target,
+                                          char **out_error);
+
+/**
+ * Install mcp-router to project .mcp.json
+ */
+bool mcp_router_install_to_project(const char *project_path,
+                                   const char *token,
+                                   uint16_t port,
+                                   char **out_error);
+
+/**
+ * Uninstall mcp-router from project .mcp.json
+ */
+bool mcp_router_uninstall_from_project(const char *project_path, char **out_error);
+
+/**
+ * Get workspace token from project .mcp.json
+ * Returns token string or null if not found
+ */
+char *mcp_router_get_project_token(const char *project_path, char **out_error);
 
 #endif  /* MCP_ROUTER_CORE_H */

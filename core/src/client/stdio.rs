@@ -1,49 +1,42 @@
-//! Stdio MCP Client - manages subprocess communication
+//! Stdio MCP Client - uses official rmcp SDK for subprocess communication
 
 use super::ClientError;
-use crate::config::{ServerConfig, StdioProtocol};
-use crate::protocol::{JsonRpcRequest, JsonRpcResponse, McpTool, McpToolsListResult, ToolCallResult};
+use crate::config::ServerConfig;
+use crate::get_runtime;
+use crate::protocol::{McpTool, ToolCallResult, ContentBlock};
 use parking_lot::RwLock;
-use serde_json::{json, Value};
+use rmcp::model::{CallToolRequestParam, Tool};
+use rmcp::service::{RoleClient, RunningService, Peer};
+use rmcp::transport::TokioChildProcess;
+use rmcp::ServiceExt;
+use serde_json::Value;
 use std::collections::HashMap;
-use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::process::Command;
+use tokio::sync::oneshot;
 
-/// Stdio-based MCP client
+/// Stdio-based MCP client using official rmcp SDK
 pub struct StdioMcpClient {
     config: ServerConfig,
-    request_id: AtomicI64,
-    is_running: AtomicBool,
+    /// The peer for sending requests to the MCP server
+    peer: RwLock<Option<Arc<Peer<RoleClient>>>>,
+    /// Cached tools list
     tools_cache: RwLock<Option<Vec<McpTool>>>,
-
-    // Process communication
-    stdin_tx: RwLock<Option<mpsc::Sender<String>>>,
-    pending_requests: Arc<RwLock<HashMap<i64, oneshot::Sender<JsonRpcResponse>>>>,
 }
 
 impl StdioMcpClient {
     pub fn new(config: ServerConfig) -> Self {
         Self {
             config,
-            request_id: AtomicI64::new(0),
-            is_running: AtomicBool::new(false),
+            peer: RwLock::new(None),
             tools_cache: RwLock::new(None),
-            stdin_tx: RwLock::new(None),
-            pending_requests: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    fn next_id(&self) -> i64 {
-        self.request_id.fetch_add(1, Ordering::SeqCst)
-    }
-
-    /// Start the subprocess
+    /// Start the subprocess and establish MCP connection
     pub async fn start(&self) -> Result<(), ClientError> {
-        if self.is_running.load(Ordering::SeqCst) {
+        // Check if already running
+        if self.peer.read().is_some() {
             return Ok(());
         }
 
@@ -60,16 +53,25 @@ impl StdioMcpClient {
         let home = std::env::var("HOME").unwrap_or_default();
         let local_bin = format!("{}/.local/bin", home);
         let cargo_bin = format!("{}/.cargo/bin", home);
-        let nvm_path = format!("{}/.nvm/versions/node", home);
 
-        let extra_paths: Vec<&str> = vec![
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-            &local_bin,
-            &cargo_bin,
-            &nvm_path,
+        let mut extra_paths: Vec<String> = vec![
+            "/opt/homebrew/bin".to_string(),
+            "/opt/homebrew/sbin".to_string(),
+            "/usr/local/bin".to_string(),
+            local_bin,
+            cargo_bin,
         ];
+
+        // Add nvm node bin paths (scan all installed versions)
+        let nvm_versions_dir = format!("{}/.nvm/versions/node", home);
+        if let Ok(entries) = std::fs::read_dir(&nvm_versions_dir) {
+            for entry in entries.flatten() {
+                let bin_path = entry.path().join("bin");
+                if bin_path.exists() {
+                    extra_paths.push(bin_path.to_string_lossy().to_string());
+                }
+            }
+        }
 
         if let Some(current_path) = env.get("PATH") {
             let new_path = format!("{}:{}", extra_paths.join(":"), current_path);
@@ -83,112 +85,64 @@ impl StdioMcpClient {
 
         // Find the actual executable path
         let executable = self.find_executable(command, &env)?;
+        let args = self.config.args.clone();
+        let name = self.config.name.clone();
 
         tracing::info!(
-            "Starting stdio process: {} {}",
+            "Starting stdio process via rmcp: {} {}",
             executable,
-            self.config.args.join(" ")
+            args.join(" ")
         );
 
-        let mut child = Command::new(&executable)
-            .args(&self.config.args)
-            .envs(&env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| ClientError::Process(format!("Failed to spawn: {}", e)))?;
+        // Use a channel to get the peer back from the spawned task
+        let (tx, rx) = oneshot::channel();
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| ClientError::Process("No stdin".to_string()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| ClientError::Process("No stdout".to_string()))?;
+        // Spawn the rmcp service on the global runtime so it stays alive
+        get_runtime().spawn(async move {
+            // Create command for rmcp
+            let mut cmd = Command::new(&executable);
+            cmd.args(&args).envs(&env);
 
-        // Create channels for stdin communication
-        let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(100);
-        *self.stdin_tx.write() = Some(stdin_tx);
-
-        // Spawn stdin writer task
-        let mut stdin = stdin;
-        tokio::spawn(async move {
-            while let Some(data) = stdin_rx.recv().await {
-                if stdin.write_all(data.as_bytes()).await.is_err() {
-                    break;
+            // Create TokioChildProcess transport and start service
+            let transport = match TokioChildProcess::new(&mut cmd) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = tx.send(Err(format!("Failed to create transport: {}", e)));
+                    return;
                 }
-                if stdin.flush().await.is_err() {
-                    break;
+            };
+
+            // Start the MCP client service (handles initialize handshake automatically)
+            let service: RunningService<RoleClient, ()> = match ().serve(transport).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx.send(Err(format!("Failed to start MCP client: {}", e)));
+                    return;
                 }
-            }
+            };
+
+            tracing::info!(
+                "{} MCP client connected, server info: {:?}",
+                name,
+                service.peer_info()
+            );
+
+            // Send the peer back to the caller
+            let peer = service.peer().clone();
+            let _ = tx.send(Ok(peer));
+
+            // Keep the service running (this task will stay alive)
+            let _ = service.waiting().await;
+            tracing::info!("{} MCP client service stopped", name);
         });
 
-        // Spawn stdout reader task
-        let pending = self.pending_requests.clone();
-        let name = self.config.name.clone();
-        let protocol = self.config.stdio_protocol;
+        // Wait for the service to initialize
+        let peer = rx
+            .await
+            .map_err(|_| ClientError::Process("Service init channel closed".to_string()))?
+            .map_err(|e| ClientError::Process(e))?;
 
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout);
-
-            loop {
-                let message = match protocol {
-                    StdioProtocol::Line => {
-                        // 按行读取
-                        let mut line = String::new();
-                        match reader.read_line(&mut line).await {
-                            Ok(0) => break, // EOF
-                            Ok(_) => {
-                                let trimmed = line.trim();
-                                if trimmed.is_empty() {
-                                    continue;
-                                }
-                                trimmed.to_string()
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    StdioProtocol::ContentLength => {
-                        // Content-Length 格式读取
-                        match read_content_length_message(&mut reader).await {
-                            Ok(Some(msg)) => msg,
-                            Ok(None) => break, // EOF
-                            Err(e) => {
-                                tracing::warn!("{} Content-Length read error: {}", name, e);
-                                continue;
-                            }
-                        }
-                    }
-                };
-
-                tracing::debug!("{} stdout: {}", name, &message[..message.len().min(100)]);
-
-                match serde_json::from_str::<JsonRpcResponse>(&message) {
-                    Ok(response) => {
-                        if let Some(id) = response.id {
-                            let mut pending = pending.write();
-                            if let Some(sender) = pending.remove(&id) {
-                                let _ = sender.send(response);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("{} failed to parse response: {}", name, e);
-                    }
-                }
-            }
-
-            tracing::info!("{} stdout reader stopped", name);
-        });
-
-        self.is_running.store(true, Ordering::SeqCst);
-
-        // Wait a bit for process to be ready
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        tracing::info!("{} stdio client started", self.config.name);
+        *self.peer.write() = Some(Arc::new(peer));
         Ok(())
     }
 
@@ -223,64 +177,6 @@ impl StdioMcpClient {
         )))
     }
 
-    /// Send request and wait for response
-    async fn send_request(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> Result<Value, ClientError> {
-        if !self.is_running.load(Ordering::SeqCst) {
-            return Err(ClientError::NotConnected);
-        }
-
-        let id = self.next_id();
-        let request = JsonRpcRequest::new(Some(id), method, params);
-        let request_json = serde_json::to_string(&request)?;
-
-        // 根据协议类型格式化消息
-        let formatted_message = match self.config.stdio_protocol {
-            StdioProtocol::Line => format!("{}\n", request_json),
-            StdioProtocol::ContentLength => {
-                format!("Content-Length: {}\r\n\r\n{}", request_json.len(), request_json)
-            }
-        };
-
-        // Create response channel
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending_requests.write();
-            pending.insert(id, tx);
-        }
-
-        // Send request
-        {
-            let stdin_tx = self.stdin_tx.read();
-            if let Some(sender) = stdin_tx.as_ref() {
-                sender
-                    .send(formatted_message)
-                    .await
-                    .map_err(|e| ClientError::Process(format!("Failed to send: {}", e)))?;
-            } else {
-                return Err(ClientError::NotConnected);
-            }
-        }
-
-        // Wait for response with timeout
-        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
-            .await
-            .map_err(|_| ClientError::Timeout)?
-            .map_err(|_| ClientError::Process("Response channel closed".to_string()))?;
-
-        if let Some(error) = response.error {
-            return Err(ClientError::Rpc {
-                code: error.code,
-                message: error.message,
-            });
-        }
-
-        response.result.ok_or(ClientError::EmptyResponse)
-    }
-
     /// List tools (with caching)
     pub async fn list_tools(&self) -> Result<Vec<McpTool>, ClientError> {
         // Check cache first
@@ -291,21 +187,32 @@ impl StdioMcpClient {
             }
         }
 
-        let result = self.send_request("tools/list", None).await?;
-        let tools_result: McpToolsListResult = serde_json::from_value(result)?;
+        let peer = self
+            .peer
+            .read()
+            .clone()
+            .ok_or(ClientError::NotConnected)?;
+
+        // Use rmcp's list_all_tools method
+        let tools = peer
+            .list_all_tools()
+            .await
+            .map_err(|e| ClientError::Rpc {
+                code: -32603,
+                message: format!("Failed to list tools: {}", e),
+            })?;
+
+        // Convert rmcp::model::Tool to our McpTool
+        let mcp_tools: Vec<McpTool> = tools.into_iter().map(convert_tool).collect();
 
         // Update cache
         {
             let mut cache = self.tools_cache.write();
-            *cache = Some(tools_result.tools.clone());
+            *cache = Some(mcp_tools.clone());
         }
 
-        tracing::info!(
-            "{}: loaded {} tools",
-            self.config.name,
-            tools_result.tools.len()
-        );
-        Ok(tools_result.tools)
+        tracing::info!("{}: loaded {} tools", self.config.name, mcp_tools.len());
+        Ok(mcp_tools)
     }
 
     /// Call a tool
@@ -314,82 +221,81 @@ impl StdioMcpClient {
         name: &str,
         arguments: Value,
     ) -> Result<ToolCallResult, ClientError> {
-        let params = json!({
-            "name": name,
-            "arguments": arguments
-        });
+        tracing::debug!("call_tool: {} args={}", name, arguments);
 
-        let result = self.send_request("tools/call", Some(params)).await?;
-        let tool_result: ToolCallResult = serde_json::from_value(result)?;
-        Ok(tool_result)
+        let peer = self
+            .peer
+            .read()
+            .clone()
+            .ok_or(ClientError::NotConnected)?;
+
+        // Convert Value to serde_json::Map
+        let args_map = match arguments {
+            Value::Object(map) => map,
+            Value::Null => serde_json::Map::new(),
+            _ => {
+                return Err(ClientError::Rpc {
+                    code: -32602,
+                    message: "Arguments must be an object".to_string(),
+                })
+            }
+        };
+
+        let params = CallToolRequestParam {
+            name: name.to_string().into(),
+            arguments: Some(args_map),
+        };
+
+        let result = peer.call_tool(params).await.map_err(|e| {
+            tracing::warn!("call_tool {} failed: {}", name, e);
+            ClientError::Rpc {
+                code: -32603,
+                message: format!("Tool call failed: {}", e),
+            }
+        })?;
+
+        // Convert rmcp result to our ToolCallResult
+        let content: Vec<ContentBlock> = result
+            .content
+            .into_iter()
+            .filter_map(|c| {
+                // rmcp Content (Annotated<RawContent>) -> our ContentBlock
+                use rmcp::model::RawContent;
+                match c.raw {
+                    RawContent::Text(t) => Some(ContentBlock::Text { text: t.text }),
+                    RawContent::Image(i) => Some(ContentBlock::Image {
+                        data: i.data,
+                        mime_type: i.mime_type
+                    }),
+                    RawContent::Resource(_) => None, // Skip resource content for now
+                }
+            })
+            .collect();
+
+        Ok(ToolCallResult {
+            content,
+            is_error: result.is_error,
+        })
     }
 
     /// Stop the subprocess
     pub async fn stop(&self) {
-        self.is_running.store(false, Ordering::SeqCst);
-        *self.stdin_tx.write() = None;
-        self.pending_requests.write().clear();
+        *self.peer.write() = None;
+        *self.tools_cache.write() = None;
         tracing::info!("{} stdio client stopped", self.config.name);
     }
 
     /// Check if running
     pub fn is_running(&self) -> bool {
-        self.is_running.load(Ordering::SeqCst)
+        self.peer.read().is_some()
     }
 }
 
-impl Drop for StdioMcpClient {
-    fn drop(&mut self) {
-        self.is_running.store(false, Ordering::SeqCst);
+/// Convert rmcp::model::Tool to our McpTool
+fn convert_tool(tool: Tool) -> McpTool {
+    McpTool {
+        name: tool.name.to_string(),
+        description: tool.description.to_string(),
+        input_schema: Some(Value::Object((*tool.input_schema).clone())),
     }
-}
-
-/// 读取 Content-Length 格式的消息
-async fn read_content_length_message<R: tokio::io::AsyncRead + Unpin>(
-    reader: &mut BufReader<R>,
-) -> Result<Option<String>, std::io::Error> {
-    // 1. 读取 header 直到 \r\n\r\n
-    let mut header = String::new();
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            return Ok(None); // EOF
-        }
-
-        header.push_str(&line);
-
-        // 检查是否到达 header 结束
-        if header.ends_with("\r\n\r\n") || header.ends_with("\n\n") {
-            break;
-        }
-    }
-
-    // 2. 解析 Content-Length
-    let content_length = header
-        .lines()
-        .find_map(|line| {
-            let lower = line.to_lowercase();
-            if lower.starts_with("content-length:") {
-                line.split(':')
-                    .nth(1)
-                    .and_then(|s| s.trim().parse::<usize>().ok())
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Missing Content-Length header",
-            )
-        })?;
-
-    // 3. 读取指定长度的内容
-    let mut content = vec![0u8; content_length];
-    reader.read_exact(&mut content).await?;
-
-    String::from_utf8(content).map(Some).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Invalid UTF-8: {}", e))
-    })
 }

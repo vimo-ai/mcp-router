@@ -23,8 +23,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 reqwest = { version = "0.12", features = ["json"] }
 
 # MCP Protocol (official Rust SDK)
-# mcp-rust-sdk = "0.1"  # TODO: uncomment when available on crates.io
-# For now, implement protocol manually
+rmcp = { version = "0.1", features = ["client", "transport-child-process", "transport-io"] }
 
 # JSON-RPC
 serde = { version = "1", features = ["derive"] }
@@ -46,12 +45,16 @@ thiserror = "2"
 anyhow = "1"
 parking_lot = "0.12"
 dashmap = "6"
+dirs = "5"
 
 # FFI
 libc = "0.2"
 
 [build-dependencies]
 cbindgen = "0.27"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 lto = true

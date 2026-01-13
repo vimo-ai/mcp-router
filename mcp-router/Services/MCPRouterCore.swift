@@ -8,6 +8,38 @@
 import Foundation
 import mcp_router_core
 
+// MARK: - Server Item (UI Model from Rust)
+
+/// Server item for UI display, decoded from Rust JSON
+struct ServerItem: Identifiable, Codable {
+    var id: String { name }
+    let name: String
+    let type: String
+    let description: String
+    var isEnabled: Bool
+    var flattenMode: Bool
+    let url: String?
+    let command: String?
+    let args: [String]?
+    let headers: [String: String]?
+    let env: [String: String]?
+    let stdioProtocol: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case type
+        case description
+        case isEnabled = "is_enabled"
+        case flattenMode = "flatten_mode"
+        case url
+        case command
+        case args
+        case headers
+        case env
+        case stdioProtocol = "stdio_protocol"
+    }
+}
+
 /// Swift wrapper for the Rust MCP Router Core
 final class MCPRouterCore {
     private var handle: OpaquePointer?
@@ -72,6 +104,19 @@ final class MCPRouterCore {
         guard let ptr = mcp_router_list_servers(handle) else { return nil }
         defer { mcp_router_free_string(ptr) }
         return String(cString: ptr)
+    }
+
+    /// List all servers as ServerItem array
+    func listServers() -> [ServerItem] {
+        guard let json = listServersJSON(),
+              let data = json.data(using: .utf8) else {
+            return []
+        }
+        do {
+            return try JSONDecoder().decode([ServerItem].self, from: data)
+        } catch {
+            return []
+        }
     }
 
     /// Add HTTP server
@@ -186,6 +231,129 @@ final class MCPRouterCore {
         guard let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(RouterStatus.self, from: data)
     }
+
+    // MARK: - Async Tool Operations (via Rust FFI)
+
+    /// List tools for a server asynchronously
+    func listTools(serverName: String, workspaceToken: String? = nil, timeout: UInt32 = 60) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let context = Unmanaged.passRetained(ToolCallContext(continuation: continuation)).toOpaque()
+
+            var error: UnsafeMutablePointer<CChar>?
+            let success = serverName.withCString { serverPtr in
+                if let token = workspaceToken {
+                    return token.withCString { tokenPtr in
+                        mcp_router_list_tools_async(handle, serverPtr, tokenPtr, timeout, toolCallback, context, &error)
+                    }
+                } else {
+                    return mcp_router_list_tools_async(handle, serverPtr, nil, timeout, toolCallback, context, &error)
+                }
+            }
+
+            if !success {
+                // Release context since callback won't be called
+                let _ = Unmanaged<ToolCallContext>.fromOpaque(context).takeRetainedValue()
+                let errorMsg = error.map { String(cString: $0) } ?? "Unknown error"
+                error.map { mcp_router_free_string($0) }
+                continuation.resume(throwing: MCPRouterCoreError.toolCallFailed(errorMsg))
+            }
+        }
+    }
+
+    /// Call a tool asynchronously
+    func callTool(serverName: String, toolName: String, arguments: String, workspaceToken: String? = nil, timeout: UInt32 = 120) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let context = Unmanaged.passRetained(ToolCallContext(continuation: continuation)).toOpaque()
+
+            var error: UnsafeMutablePointer<CChar>?
+            let success = serverName.withCString { serverPtr in
+                toolName.withCString { toolPtr in
+                    arguments.withCString { argsPtr in
+                        if let token = workspaceToken {
+                            return token.withCString { tokenPtr in
+                                mcp_router_call_tool_async(handle, serverPtr, toolPtr, argsPtr, tokenPtr, timeout, toolCallback, context, &error)
+                            }
+                        } else {
+                            return mcp_router_call_tool_async(handle, serverPtr, toolPtr, argsPtr, nil, timeout, toolCallback, context, &error)
+                        }
+                    }
+                }
+            }
+
+            if !success {
+                let _ = Unmanaged<ToolCallContext>.fromOpaque(context).takeRetainedValue()
+                let errorMsg = error.map { String(cString: $0) } ?? "Unknown error"
+                error.map { mcp_router_free_string($0) }
+                continuation.resume(throwing: MCPRouterCoreError.toolCallFailed(errorMsg))
+            }
+        }
+    }
+
+    // MARK: - Persistence
+
+    /// Load all servers from config files
+    func loadAllServers() throws {
+        var error: UnsafeMutablePointer<CChar>?
+        let success = mcp_router_load_all_servers(handle, &error)
+        if !success, let error = error {
+            defer { mcp_router_free_string(error) }
+            throw MCPRouterCoreError.loadFailed(String(cString: error))
+        }
+    }
+
+    /// Add server and persist to config
+    func addServerAndPersist(json: String, target: String = "global") throws {
+        var error: UnsafeMutablePointer<CChar>?
+        let success = json.withCString { jsonPtr in
+            target.withCString { targetPtr in
+                mcp_router_add_server_and_persist(handle, jsonPtr, targetPtr, &error)
+            }
+        }
+        if !success, let error = error {
+            defer { mcp_router_free_string(error) }
+            throw MCPRouterCoreError.addServerFailed(String(cString: error))
+        }
+    }
+
+    /// Remove server and persist to config
+    func removeServerAndPersist(name: String, target: String = "global") throws {
+        var error: UnsafeMutablePointer<CChar>?
+        let success = name.withCString { namePtr in
+            target.withCString { targetPtr in
+                mcp_router_remove_server_and_persist(handle, namePtr, targetPtr, &error)
+            }
+        }
+        if !success, let error = error {
+            defer { mcp_router_free_string(error) }
+            throw MCPRouterCoreError.removeServerFailed(String(cString: error))
+        }
+    }
+}
+
+// MARK: - Async Callback Support
+
+/// Context for async tool calls
+private final class ToolCallContext {
+    let continuation: CheckedContinuation<String, Error>
+
+    init(continuation: CheckedContinuation<String, Error>) {
+        self.continuation = continuation
+    }
+}
+
+/// C callback for async tool operations
+private let toolCallback: McpToolCallback = { context, success, resultJson, errorMessage in
+    guard let context = context else { return }
+
+    let ctx = Unmanaged<ToolCallContext>.fromOpaque(context).takeRetainedValue()
+
+    if success {
+        let result = resultJson.map { String(cString: $0) } ?? "{}"
+        ctx.continuation.resume(returning: result)
+    } else {
+        let error = errorMessage.map { String(cString: $0) } ?? "Unknown error"
+        ctx.continuation.resume(throwing: MCPRouterCoreError.toolCallFailed(error))
+    }
 }
 
 // MARK: - Error Types
@@ -198,6 +366,7 @@ enum MCPRouterCoreError: LocalizedError {
     case updateFailed(String)
     case serverStartFailed(String)
     case serverStopFailed(String)
+    case toolCallFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -208,6 +377,7 @@ enum MCPRouterCoreError: LocalizedError {
         case .updateFailed(let msg): return "Update failed: \(msg)"
         case .serverStartFailed(let msg): return "Server start failed: \(msg)"
         case .serverStopFailed(let msg): return "Server stop failed: \(msg)"
+        case .toolCallFailed(let msg): return "Tool call failed: \(msg)"
         }
     }
 }

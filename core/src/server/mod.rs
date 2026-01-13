@@ -1,5 +1,6 @@
 //! HTTP Server implementation using axum
 
+use crate::persistence::RouterConfigManager;
 use crate::protocol::{
     JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpInitializeResult, McpToolCallParams,
 };
@@ -212,11 +213,16 @@ async fn process_request(
                 // Check if it's a management tool (requires write access)
                 if crate::router::meta_tools::is_management_tool(&tool_name) {
                     let mut router = router_clone.write();
-                    crate::router::meta_tools::handle_management_tool_call(
+                    let result = crate::router::meta_tools::handle_management_tool_call(
                         &mut router,
                         &tool_name,
-                        arguments,
-                    )
+                        arguments.clone(),
+                    );
+                    // Persist to Claude config on success
+                    if result.is_ok() {
+                        persist_management_change(&tool_name, &arguments, &router);
+                    }
+                    result
                 } else {
                     let result = tokio::task::block_in_place(|| {
                         let router = router_clone.read();
@@ -237,11 +243,16 @@ async fn process_request(
                                 if let Some(tool_name) = forward_tool {
                                     if crate::router::meta_tools::is_management_tool(tool_name) {
                                         let mut router = router_clone.write();
-                                        crate::router::meta_tools::handle_management_tool_call(
+                                        let result = crate::router::meta_tools::handle_management_tool_call(
                                             &mut router,
                                             tool_name,
-                                            forward_args,
-                                        )
+                                            forward_args.clone(),
+                                        );
+                                        // Persist to Claude config on success
+                                        if result.is_ok() {
+                                            persist_management_change(tool_name, &forward_args, &router);
+                                        }
+                                        result
                                     } else {
                                         tokio::task::block_in_place(|| {
                                             let router = router_clone.read();
@@ -292,5 +303,56 @@ async fn process_request(
         }
 
         _ => (Err(JsonRpcError::method_not_found(&request.method)), None),
+    }
+}
+
+/// Persist management tool changes to mcp-router's own config
+fn persist_management_change(tool_name: &str, arguments: &Value, router: &McpRouter) {
+    let manager = match RouterConfigManager::new() {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("Failed to create RouterConfigManager: {}", e);
+            return;
+        }
+    };
+
+    match tool_name {
+        "mcp_router__add_server" => {
+            // Find the added server in router's config and persist it
+            if let Some(name) = arguments.get("name").and_then(|v| v.as_str()) {
+                if let Some(config) = router.server_configs().iter().find(|c| c.name == name) {
+                    if let Err(e) = manager.upsert_server(config) {
+                        tracing::warn!("Failed to persist added server '{}': {}", name, e);
+                    } else {
+                        tracing::info!("Persisted added server '{}' to servers.json", name);
+                    }
+                }
+            }
+        }
+        "mcp_router__remove_server" => {
+            if let Some(name) = arguments.get("name").and_then(|v| v.as_str()) {
+                // Ignore error if server doesn't exist in persistence (might have been loaded from .claude.json)
+                match manager.remove_server(name) {
+                    Ok(()) => tracing::info!("Removed server '{}' from servers.json", name),
+                    Err(crate::persistence::PersistenceError::ServerNotFound(_)) => {
+                        tracing::debug!("Server '{}' not in servers.json (may be from .claude.json)", name);
+                    }
+                    Err(e) => tracing::warn!("Failed to remove server '{}': {}", name, e),
+                }
+            }
+        }
+        "mcp_router__update_server" => {
+            // For updates, re-save the server config
+            if let Some(name) = arguments.get("name").and_then(|v| v.as_str()) {
+                if let Some(config) = router.server_configs().iter().find(|c| c.name == name) {
+                    if let Err(e) = manager.upsert_server(config) {
+                        tracing::warn!("Failed to persist updated server '{}': {}", name, e);
+                    } else {
+                        tracing::info!("Persisted updated server '{}' to servers.json", name);
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }

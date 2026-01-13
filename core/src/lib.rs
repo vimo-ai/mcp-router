@@ -6,6 +6,7 @@
 pub mod client;
 pub mod config;
 pub mod ffi;
+pub mod persistence;
 pub mod protocol;
 pub mod router;
 pub mod server;
@@ -17,8 +18,15 @@ use tokio::runtime::Runtime;
 /// Global runtime instance for FFI calls
 static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
 
-fn get_runtime() -> &'static Runtime {
+/// Get or create the global tokio runtime
+pub fn get_runtime() -> &'static Runtime {
     RUNTIME.get_or_init(|| {
+        // Ignore SIGHUP to prevent crashes when child processes disconnect
+        #[cfg(unix)]
+        unsafe {
+            libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        }
+
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()

@@ -3,6 +3,7 @@
 //  mcp-router
 //
 //  Server 管理界面 - 卡片式展示
+//  数据源: Rust Core (servers.json)
 //
 
 import SwiftUI
@@ -10,12 +11,11 @@ import SwiftData
 import UniformTypeIdentifiers
 
 struct ServersView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var servers: [ServerConfig]
+    @EnvironmentObject var appDelegate: AppDelegate
+    @State private var servers: [ServerItem] = []
     @State private var showingAddServer = false
-    @State private var editingServer: ServerConfig?
+    @State private var editingServerName: String?
     @State private var showingImport = false
-    @State private var refreshTrigger = UUID()  // 用于强制刷新
 
     var body: some View {
         NavigationStack {
@@ -26,9 +26,9 @@ struct ServersView: View {
                     LazyVGrid(columns: [
                         GridItem(.adaptive(minimum: 300, maximum: 400), spacing: 16)
                     ], spacing: 16) {
-                        ForEach(servers) { server in
-                            ServerCardView(server: server) {
-                                editingServer = server
+                        ForEach($servers) { $server in
+                            ServerCardView(server: $server) {
+                                editingServerName = server.name
                             } onDelete: {
                                 deleteServer(server)
                             }
@@ -70,19 +70,25 @@ struct ServersView: View {
             .sheet(isPresented: $showingAddServer) {
                 ServerEditView(server: nil)
             }
-            .sheet(item: $editingServer) { server in
-                ServerEditView(server: server)
+            .sheet(item: $editingServerName) { name in
+                // 从 SwiftData 找到对应的 ServerConfig 用于编辑
+                // TODO: 后续改成纯 Rust 编辑
+                ServerEditViewWrapper(serverName: name)
             }
             .sheet(isPresented: $showingImport) {
                 JSONImportView()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .serverConfigDidChange)) { _ in
-                // 通过 MCP 添加/删除 Server 后，强制刷新 SwiftData 查询
-                modelContext.processPendingChanges()
-                refreshTrigger = UUID()
+            .onAppear {
+                loadServers()
             }
-            .id(refreshTrigger)  // 当 refreshTrigger 变化时重建视图
+            .onReceive(NotificationCenter.default.publisher(for: .serverConfigDidChange)) { _ in
+                loadServers()
+            }
         }
+    }
+
+    private func loadServers() {
+        servers = appDelegate.routerCore.listServers()
     }
 
     private var emptyState: some View {
@@ -109,12 +115,13 @@ struct ServersView: View {
         .padding(40)
     }
 
-    private func deleteServer(_ server: ServerConfig) {
-        modelContext.delete(server)
-        try? modelContext.save()
-
-        // 通知配置变化
-        NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+    private func deleteServer(_ server: ServerItem) {
+        do {
+            try appDelegate.routerCore.removeServerAndPersist(name: server.name)
+            NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
+        } catch {
+            // 静默处理删除失败
+        }
     }
 
     private func exportToJSON() {
@@ -123,26 +130,26 @@ struct ServersView: View {
 
         for server in servers {
             var config: [String: Any] = [
-                "type": server.type.rawValue
+                "type": server.type
             ]
 
             // 根据类型添加对应字段
-            if server.type == .http {
+            if server.type == "http" {
                 if let url = server.url {
                     config["url"] = url
                 }
-                if !server.headers.isEmpty {
-                    config["headers"] = server.headers
+                if let headers = server.headers, !headers.isEmpty {
+                    config["headers"] = headers
                 }
-            } else if server.type == .stdio {
+            } else if server.type == "stdio" {
                 if let command = server.command {
                     config["command"] = command
                 }
-                if !server.args.isEmpty {
-                    config["args"] = server.args
+                if let args = server.args, !args.isEmpty {
+                    config["args"] = args
                 }
-                if !server.env.isEmpty {
-                    config["env"] = server.env
+                if let env = server.env, !env.isEmpty {
+                    config["env"] = env
                 }
             }
 
@@ -169,11 +176,31 @@ struct ServersView: View {
     }
 }
 
+// MARK: - Server Edit Wrapper (临时兼容 SwiftData)
+
+struct ServerEditViewWrapper: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query private var allServers: [ServerConfig]
+    let serverName: String
+
+    var body: some View {
+        if let server = allServers.first(where: { $0.name == serverName }) {
+            ServerEditView(server: server)
+        } else {
+            Text("Server not found")
+        }
+    }
+}
+
+extension String: @retroactive Identifiable {
+    public var id: String { self }
+}
+
 // MARK: - Server Card
 
 struct ServerCardView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Bindable var server: ServerConfig
+    @EnvironmentObject var appDelegate: AppDelegate
+    @Binding var server: ServerItem
     let onEdit: () -> Void
     let onDelete: () -> Void
 
@@ -190,22 +217,28 @@ struct ServerCardView: View {
                 Toggle("", isOn: $server.isEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .onChange(of: server.isEnabled) {
-                        try? modelContext.save()
+                    .onChange(of: server.isEnabled) { _, newValue in
+                        // 通过 Rust FFI 持久化到 servers.json
+                        try? appDelegate.routerCore.setServerEnabled(name: server.name, enabled: newValue)
                         NotificationCenter.default.post(name: .serverConfigDidChange, object: nil)
                     }
             }
 
             // 描述
-            if !server.serverDescription.isEmpty {
-                Text(server.serverDescription)
+            if !server.description.isEmpty {
+                Text(server.description)
                     .font(DesignSystem.Typography.subheadline)
                     .foregroundColor(DesignSystem.Colors.secondaryText)
             }
 
-            // URL
+            // URL 或 Command
             if let url = server.url {
                 Label(url, systemImage: "link")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .lineLimit(1)
+            } else if let command = server.command {
+                Label(command, systemImage: "terminal")
                     .font(DesignSystem.Typography.caption)
                     .foregroundColor(DesignSystem.Colors.secondaryText)
                     .lineLimit(1)
@@ -244,5 +277,4 @@ struct ServerCardView: View {
 
 #Preview {
     ServersView()
-        .modelContainer(for: ServerConfig.self, inMemory: true)
 }

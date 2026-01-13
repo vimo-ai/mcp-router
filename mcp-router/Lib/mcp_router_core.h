@@ -11,9 +11,29 @@
 #include <stdlib.h>
 
 /**
+ * Error code indicating a forward to meta tool is needed
+ * Using -32000 (server-defined error range: -32000 to -32099)
+ */
+#define FORWARD_TO_META_TOOL -32000
+
+/**
  * Opaque handle to the router
  */
 typedef struct McpRouterHandle McpRouterHandle;
+
+/**
+ * Callback type for async tool calls
+ * - context: opaque pointer passed back to Swift (e.g., continuation)
+ * - success: true if call succeeded
+ * - result_json: JSON string of result (null if failed)
+ * - error_message: error message (null if succeeded)
+ *
+ * NOTE: Strings are valid only during callback. Swift must copy if needed.
+ */
+typedef void (*McpToolCallback)(void *context,
+                                bool success,
+                                const char *result_json,
+                                const char *error_message);
 
 /**
  * Create a new router instance
@@ -124,5 +144,136 @@ void mcp_router_init_logging(void);
  * Get version string
  */
 char *mcp_router_version(void);
+
+/**
+ * Call a tool asynchronously
+ *
+ * This function returns immediately. The callback will be invoked on completion.
+ * The callback is called from a background thread - Swift must dispatch to main if needed.
+ *
+ * Parameters:
+ * - handle: Router handle
+ * - server_name: Name of the server (e.g., "lsp")
+ * - tool_name: Name of the tool (e.g., "lsp_goto_definition")
+ * - arguments_json: JSON string of tool arguments
+ * - workspace_token: Optional workspace token (can be null for default)
+ * - timeout_secs: Timeout in seconds (0 = default 120s)
+ * - callback: Function to call on completion
+ * - context: Opaque pointer passed to callback (typically Swift continuation)
+ * - out_error: Receives error message if function returns false
+ *
+ * Returns: true if async call was started, false if setup failed
+ */
+bool mcp_router_call_tool_async(struct McpRouterHandle *handle,
+                                const char *server_name,
+                                const char *tool_name,
+                                const char *arguments_json,
+                                const char *workspace_token,
+                                uint32_t timeout_secs,
+                                McpToolCallback callback,
+                                void *context,
+                                char **out_error);
+
+/**
+ * List tools for a server asynchronously
+ *
+ * Similar to call_tool_async, returns immediately and invokes callback on completion.
+ */
+bool mcp_router_list_tools_async(struct McpRouterHandle *handle,
+                                 const char *server_name,
+                                 const char *workspace_token,
+                                 uint32_t timeout_secs,
+                                 McpToolCallback callback,
+                                 void *context,
+                                 char **out_error);
+
+/**
+ * Load settings from ~/.vimo/mcp-router/settings.json
+ * Returns JSON string on success (caller must free), null on failure
+ */
+char *mcp_router_load_settings(char **out_error);
+
+/**
+ * Save settings to ~/.vimo/mcp-router/settings.json
+ */
+bool mcp_router_save_settings(const char *json, char **out_error);
+
+/**
+ * Load workspaces from ~/.vimo/mcp-router/workspaces.json into router
+ */
+bool mcp_router_load_workspaces_from_file(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Save workspaces from router to ~/.vimo/mcp-router/workspaces.json
+ */
+bool mcp_router_save_workspaces_to_file(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.claude.json
+ */
+bool mcp_router_is_installed_to_claude_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.claude.json
+ */
+bool mcp_router_install_to_claude_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.claude.json
+ */
+bool mcp_router_uninstall_from_claude_global(char **out_error);
+
+/**
+ * Load servers from ~/.claude.json into router
+ */
+bool mcp_router_load_servers_from_claude_config(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Load servers from ~/.vimo/mcp-router/servers.json into router (appends to existing)
+ */
+bool mcp_router_load_servers_from_router_config(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Load servers from both sources: ~/.claude.json first, then ~/.vimo/mcp-router/servers.json
+ * Servers from servers.json override those from claude.json if same name
+ * Also auto-migrates from SwiftData if servers.json doesn't exist
+ */
+bool mcp_router_load_all_servers(struct McpRouterHandle *handle, char **out_error);
+
+/**
+ * Add server to both router and config file
+ * target: "global" or "project:/path/to/project"
+ */
+bool mcp_router_add_server_and_persist(struct McpRouterHandle *handle,
+                                       const char *json,
+                                       const char *target,
+                                       char **out_error);
+
+/**
+ * Remove server from both router and config file
+ */
+bool mcp_router_remove_server_and_persist(struct McpRouterHandle *handle,
+                                          const char *name,
+                                          const char *target,
+                                          char **out_error);
+
+/**
+ * Install mcp-router to project .mcp.json
+ */
+bool mcp_router_install_to_project(const char *project_path,
+                                   const char *token,
+                                   uint16_t port,
+                                   char **out_error);
+
+/**
+ * Uninstall mcp-router from project .mcp.json
+ */
+bool mcp_router_uninstall_from_project(const char *project_path, char **out_error);
+
+/**
+ * Get workspace token from project .mcp.json
+ * Returns token string or null if not found
+ */
+char *mcp_router_get_project_token(const char *project_path, char **out_error);
 
 #endif  /* MCP_ROUTER_CORE_H */

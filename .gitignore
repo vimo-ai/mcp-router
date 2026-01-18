@@ -119,3 +119,4 @@ core/Cargo.lock
 
 # Rust dylib (built locally, CI builds separately)
 mcp-router/Lib/*.dylib
+target/

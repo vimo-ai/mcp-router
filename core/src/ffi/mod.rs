@@ -9,7 +9,10 @@
 
 use crate::config::{AppSettings, ServerConfig, Workspace};
 use crate::get_runtime;
-use crate::persistence::{ClaudeConfigManager, McpConfigManager, RouterConfigManager};
+use crate::persistence::{
+    ClaudeConfigManager, CodexConfigManager, GeminiConfigManager,
+    McpConfigManager, OpenCodeConfigManager, RouterConfigManager,
+};
 use crate::router::McpRouter;
 use crate::server;
 use libc::{c_char, c_void};
@@ -17,6 +20,7 @@ use parking_lot::RwLock;
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use vimo_ffi::{ffi_boundary, cstr_to_string, cstr_to_str_or, str_to_cstring, check_not_null, FfiError};
 
 /// Callback type for async tool calls
 /// - context: opaque pointer passed back to Swift (e.g., continuation)
@@ -59,15 +63,6 @@ impl AsyncCallbackContext {
 pub struct McpRouterHandle {
     router: Arc<RwLock<McpRouter>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
-}
-
-/// Helper to set error message
-unsafe fn set_error(out_error: *mut *mut c_char, msg: &str) {
-    if !out_error.is_null() {
-        if let Ok(c_string) = CString::new(msg) {
-            *out_error = c_string.into_raw();
-        }
-    }
 }
 
 // MARK: - Router Lifecycle
@@ -115,35 +110,20 @@ pub extern "C" fn mcp_router_add_http_server(
     description: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || name.is_null() || url.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let name = unsafe { cstr_to_string(name)? };
+        let url = unsafe { cstr_to_string(url)? };
+        let description = unsafe { cstr_to_str_or(description, "") };
 
-    let name = unsafe { CStr::from_ptr(name) }
-        .to_str()
-        .unwrap_or_default()
-        .to_string();
-    let url = unsafe { CStr::from_ptr(url) }
-        .to_str()
-        .unwrap_or_default()
-        .to_string();
-    let description = if description.is_null() {
-        String::new()
-    } else {
-        unsafe { CStr::from_ptr(description) }
-            .to_str()
-            .unwrap_or_default()
-            .to_string()
-    };
+        let handle = unsafe { &mut *handle };
+        let config = ServerConfig::new_http(&name, &url).with_description(description);
 
-    let handle = unsafe { &mut *handle };
-    let config = ServerConfig::new_http(&name, &url).with_description(&description);
+        let mut router = handle.router.write();
+        router.load_servers(vec![config]);
 
-    let mut router = handle.router.write();
-    router.load_servers(vec![config]);
-
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Add a stdio server configuration (JSON format)
@@ -153,28 +133,19 @@ pub extern "C" fn mcp_router_add_server_json(
     json: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || json.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let json_str = unsafe { cstr_to_string(json)? };
 
-    let json_str = unsafe { CStr::from_ptr(json) }
-        .to_str()
-        .unwrap_or_default();
+        let config: ServerConfig = serde_json::from_str(&json_str)
+            .map_err(|e| FfiError::custom(format!("Invalid JSON: {}", e)))?;
 
-    let config: ServerConfig = match serde_json::from_str(json_str) {
-        Ok(c) => c,
-        Err(e) => {
-            unsafe { set_error(out_error, &format!("Invalid JSON: {}", e)) };
-            return false;
-        }
-    };
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.add_server(config);
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-    router.add_server(config);
-
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Load servers from JSON array
@@ -184,28 +155,19 @@ pub extern "C" fn mcp_router_load_servers_json(
     json: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || json.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let json_str = unsafe { cstr_to_string(json)? };
 
-    let json_str = unsafe { CStr::from_ptr(json) }
-        .to_str()
-        .unwrap_or_default();
+        let configs: Vec<ServerConfig> = serde_json::from_str(&json_str)
+            .map_err(|e| FfiError::custom(format!("Invalid JSON: {}", e)))?;
 
-    let configs: Vec<ServerConfig> = match serde_json::from_str(json_str) {
-        Ok(c) => c,
-        Err(e) => {
-            unsafe { set_error(out_error, &format!("Invalid JSON: {}", e)) };
-            return false;
-        }
-    };
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.load_servers(configs);
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-    router.load_servers(configs);
-
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Load workspaces from JSON array
@@ -215,28 +177,19 @@ pub extern "C" fn mcp_router_load_workspaces_json(
     json: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || json.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let json_str = unsafe { cstr_to_string(json)? };
 
-    let json_str = unsafe { CStr::from_ptr(json) }
-        .to_str()
-        .unwrap_or_default();
+        let workspaces: Vec<Workspace> = serde_json::from_str(&json_str)
+            .map_err(|e| FfiError::custom(format!("Invalid JSON: {}", e)))?;
 
-    let workspaces: Vec<Workspace> = match serde_json::from_str(json_str) {
-        Ok(w) => w,
-        Err(e) => {
-            unsafe { set_error(out_error, &format!("Invalid JSON: {}", e)) };
-            return false;
-        }
-    };
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.load_workspaces(workspaces);
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-    router.load_workspaces(workspaces);
-
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 // MARK: - Server Query & Management
@@ -267,24 +220,19 @@ pub extern "C" fn mcp_router_remove_server(
     name: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || name.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let name = unsafe { cstr_to_string(name)? };
 
-    let name = unsafe { CStr::from_ptr(name) }
-        .to_str()
-        .unwrap_or_default();
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-
-    if router.remove_server(name) {
-        true
-    } else {
-        unsafe { set_error(out_error, "Server not found") };
-        false
-    }
+        if router.remove_server(&name) {
+            Ok(true)
+        } else {
+            Err(FfiError::custom("Server not found"))
+        }
+    })
 }
 
 /// Set server enabled/disabled and persist to servers.json
@@ -295,32 +243,28 @@ pub extern "C" fn mcp_router_set_server_enabled(
     enabled: bool,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || name.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let name = unsafe { cstr_to_string(name)? };
 
-    let name = unsafe { CStr::from_ptr(name) }
-        .to_str()
-        .unwrap_or_default();
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.set_server_enabled(&name, enabled);
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-    router.set_server_enabled(name, enabled);
-
-    // Persist to servers.json
-    if let Some(config) = router.server_configs().iter().find(|c| c.name == name) {
-        if let Ok(manager) = RouterConfigManager::new() {
-            if let Err(e) = manager.upsert_server(config) {
-                tracing::warn!("Failed to persist server '{}' enabled={}: {}", name, enabled, e);
-                unsafe { set_error(out_error, &format!("Failed to persist: {}", e)) };
-                return false;
+        // Persist to servers.json
+        if let Some(config) = router.server_configs().iter().find(|c| c.name == name) {
+            if let Ok(manager) = RouterConfigManager::new() {
+                manager.upsert_server(config)
+                    .map_err(|e| {
+                        tracing::warn!("Failed to persist server '{}' enabled={}: {}", name, enabled, e);
+                        FfiError::custom(format!("Failed to persist: {}", e))
+                    })?;
+                tracing::info!("Persisted server '{}' enabled={} to servers.json", name, enabled);
             }
-            tracing::info!("Persisted server '{}' enabled={} to servers.json", name, enabled);
         }
-    }
 
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Set server flatten mode and persist to servers.json
@@ -331,32 +275,28 @@ pub extern "C" fn mcp_router_set_server_flatten_mode(
     flatten: bool,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || name.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let name = unsafe { cstr_to_string(name)? };
 
-    let name = unsafe { CStr::from_ptr(name) }
-        .to_str()
-        .unwrap_or_default();
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.set_server_flatten_mode(&name, flatten);
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-    router.set_server_flatten_mode(name, flatten);
-
-    // Persist to servers.json
-    if let Some(config) = router.server_configs().iter().find(|c| c.name == name) {
-        if let Ok(manager) = RouterConfigManager::new() {
-            if let Err(e) = manager.upsert_server(config) {
-                tracing::warn!("Failed to persist server '{}' flatten={}: {}", name, flatten, e);
-                unsafe { set_error(out_error, &format!("Failed to persist: {}", e)) };
-                return false;
+        // Persist to servers.json
+        if let Some(config) = router.server_configs().iter().find(|c| c.name == name) {
+            if let Ok(manager) = RouterConfigManager::new() {
+                manager.upsert_server(config)
+                    .map_err(|e| {
+                        tracing::warn!("Failed to persist server '{}' flatten={}: {}", name, flatten, e);
+                        FfiError::custom(format!("Failed to persist: {}", e))
+                    })?;
+                tracing::info!("Persisted server '{}' flatten={} to servers.json", name, flatten);
             }
-            tracing::info!("Persisted server '{}' flatten={} to servers.json", name, flatten);
         }
-    }
 
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Set expose management tools (Light/Full mode)
@@ -368,16 +308,15 @@ pub extern "C" fn mcp_router_set_expose_management_tools(
     expose: bool,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    let handle = unsafe { &mut *handle };
-    let mut router = handle.router.write();
-    router.set_expose_management_tools(expose);
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.set_expose_management_tools(expose);
 
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Get current expose management tools setting
@@ -426,32 +365,30 @@ pub extern "C" fn mcp_router_start_server(
     port: u16,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    let handle = unsafe { &mut *handle };
+        let handle = unsafe { &mut *handle };
 
-    // Check if already running
-    if handle.shutdown_tx.is_some() {
-        unsafe { set_error(out_error, "Server already running") };
-        return false;
-    }
-
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    handle.shutdown_tx = Some(shutdown_tx);
-
-    let router = handle.router.clone();
-
-    // Start server on global runtime
-    get_runtime().spawn(async move {
-        if let Err(e) = server::run_server(port, router, shutdown_rx).await {
-            tracing::error!("Server error: {}", e);
+        // Check if already running
+        if handle.shutdown_tx.is_some() {
+            return Err(FfiError::custom("Server already running"));
         }
-    });
 
-    true
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        handle.shutdown_tx = Some(shutdown_tx);
+
+        let router = handle.router.clone();
+
+        // Start server on global runtime
+        get_runtime().spawn(async move {
+            if let Err(e) = server::run_server(port, router, shutdown_rx).await {
+                tracing::error!("Server error: {}", e);
+            }
+        });
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Stop the HTTP server
@@ -460,20 +397,18 @@ pub extern "C" fn mcp_router_stop_server(
     handle: *mut McpRouterHandle,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    let handle = unsafe { &mut *handle };
+        let handle = unsafe { &mut *handle };
 
-    if let Some(tx) = handle.shutdown_tx.take() {
-        let _ = tx.send(());
-        true
-    } else {
-        unsafe { set_error(out_error, "Server not running") };
-        false
-    }
+        if let Some(tx) = handle.shutdown_tx.take() {
+            let _ = tx.send(());
+            Ok(true)
+        } else {
+            Err(FfiError::custom("Server not running"))
+        }
+    })
 }
 
 // MARK: - Utilities
@@ -531,117 +466,85 @@ pub extern "C" fn mcp_router_call_tool_async(
     context: *mut c_void,
     out_error: *mut *mut c_char,
 ) -> bool {
-    // Validate handle
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    // Validate required parameters
-    if server_name.is_null() || tool_name.is_null() || arguments_json.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments: server_name, tool_name, and arguments_json are required") };
-        return false;
-    }
+        // Parse parameters (must be done on calling thread)
+        let server_name = unsafe { cstr_to_string(server_name)? };
+        let tool_name = unsafe { cstr_to_string(tool_name)? };
+        let arguments_str = unsafe { cstr_to_string(arguments_json)? };
 
-    // Parse parameters (must be done on calling thread)
-    let server_name = match unsafe { CStr::from_ptr(server_name) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            unsafe { set_error(out_error, "Invalid UTF-8 in server_name") };
-            return false;
-        }
-    };
+        let arguments: serde_json::Value = serde_json::from_str(&arguments_str)
+            .map_err(|e| FfiError::custom(format!("Invalid JSON in arguments: {}", e)))?;
 
-    let tool_name = match unsafe { CStr::from_ptr(tool_name) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            unsafe { set_error(out_error, "Invalid UTF-8 in tool_name") };
-            return false;
-        }
-    };
+        // Optional workspace token
+        let workspace_token = if workspace_token.is_null() {
+            None
+        } else {
+            match unsafe { CStr::from_ptr(workspace_token) }.to_str() {
+                Ok(s) if !s.is_empty() => Some(s.to_string()),
+                _ => None,
+            }
+        };
 
-    let arguments_str = match unsafe { CStr::from_ptr(arguments_json) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            unsafe { set_error(out_error, "Invalid UTF-8 in arguments_json") };
-            return false;
-        }
-    };
+        let timeout = if timeout_secs == 0 {
+            std::time::Duration::from_secs(120) // Default 120 seconds
+        } else {
+            std::time::Duration::from_secs(timeout_secs as u64)
+        };
 
-    let arguments: serde_json::Value = match serde_json::from_str(&arguments_str) {
-        Ok(v) => v,
-        Err(e) => {
-            unsafe { set_error(out_error, &format!("Invalid JSON in arguments: {}", e)) };
-            return false;
-        }
-    };
+        // Get router reference
+        let handle = unsafe { &*handle };
+        let router = handle.router.clone();
 
-    let workspace_token = if workspace_token.is_null() {
-        None
-    } else {
-        match unsafe { CStr::from_ptr(workspace_token) }.to_str() {
-            Ok(s) if !s.is_empty() => Some(s.to_string()),
-            _ => None,
-        }
-    };
+        let ctx = AsyncCallbackContext::new(callback, context);
 
-    let timeout = if timeout_secs == 0 {
-        std::time::Duration::from_secs(120) // Default 120 seconds
-    } else {
-        std::time::Duration::from_secs(timeout_secs as u64)
-    };
-
-    // Get router reference
-    let handle = unsafe { &*handle };
-    let router = handle.router.clone();
-
-    let ctx = AsyncCallbackContext::new(callback, context);
-
-    // Spawn async task on global runtime (use spawn_blocking for non-Send futures)
-    get_runtime().spawn_blocking(move || {
-        get_runtime().block_on(async move {
-            // Find workspace
-            let router_read = router.read();
-            let workspace = router_read.find_workspace(workspace_token.as_deref());
-            drop(router_read);
-
-            // Call tool with timeout
-            let result = tokio::time::timeout(timeout, async {
+        // Spawn async task on global runtime (use spawn_blocking for non-Send futures)
+        get_runtime().spawn_blocking(move || {
+            get_runtime().block_on(async move {
+                // Find workspace
                 let router_read = router.read();
-                router_read.call_tool(&server_name, &tool_name, arguments, workspace.as_ref()).await
-            }).await;
+                let workspace = router_read.find_workspace(workspace_token.as_deref());
+                drop(router_read);
 
-        match result {
-            Ok(Ok(tool_result)) => {
-                // Serialize result
-                match serde_json::to_string(&tool_result) {
-                    Ok(json) => {
-                        let json_cstr = CString::new(json)
-                            .unwrap_or_else(|_| CString::new("{}").unwrap());
-                        ctx.invoke(true, json_cstr.as_ptr(), std::ptr::null());
+                // Call tool with timeout
+                let result = tokio::time::timeout(timeout, async {
+                    let router_read = router.read();
+                    router_read.call_tool(&server_name, &tool_name, arguments, workspace.as_ref()).await
+                }).await;
+
+                match result {
+                    Ok(Ok(tool_result)) => {
+                        // Serialize result
+                        match serde_json::to_string(&tool_result) {
+                            Ok(json) => {
+                                let json_cstr = CString::new(json)
+                                    .unwrap_or_else(|_| CString::new("{}").unwrap());
+                                ctx.invoke(true, json_cstr.as_ptr(), std::ptr::null());
+                            }
+                            Err(e) => {
+                                let error_msg = CString::new(format!("Failed to serialize result: {}", e))
+                                    .unwrap_or_else(|_| CString::new("Serialization error").unwrap());
+                                ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
+                            }
+                        }
                     }
-                    Err(e) => {
-                        let error_msg = CString::new(format!("Failed to serialize result: {}", e))
-                            .unwrap_or_else(|_| CString::new("Serialization error").unwrap());
+                    Ok(Err(e)) => {
+                        let error_msg = CString::new(format!("Tool call failed: {}", e.message))
+                            .unwrap_or_else(|_| CString::new("Tool error").unwrap());
+                        ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
+                    }
+                    Err(_) => {
+                        let error_msg = CString::new(format!("Tool call timed out after {} seconds", timeout.as_secs()))
+                            .unwrap_or_else(|_| CString::new("Timeout").unwrap());
                         ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
                     }
                 }
-            }
-            Ok(Err(e)) => {
-                let error_msg = CString::new(format!("Tool call failed: {}", e.message))
-                    .unwrap_or_else(|_| CString::new("Tool error").unwrap());
-                ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
-            }
-            Err(_) => {
-                let error_msg = CString::new(format!("Tool call timed out after {} seconds", timeout.as_secs()))
-                    .unwrap_or_else(|_| CString::new("Timeout").unwrap());
-                ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
-            }
-        }
-        })
-    });
+            })
+        });
 
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// List tools for a server asynchronously
@@ -657,83 +560,71 @@ pub extern "C" fn mcp_router_list_tools_async(
     context: *mut c_void,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let server_name = unsafe { cstr_to_string(server_name)? };
 
-    if server_name.is_null() {
-        unsafe { set_error(out_error, "server_name is required") };
-        return false;
-    }
+        // Optional workspace token
+        let workspace_token = if workspace_token.is_null() {
+            None
+        } else {
+            match unsafe { CStr::from_ptr(workspace_token) }.to_str() {
+                Ok(s) if !s.is_empty() => Some(s.to_string()),
+                _ => None,
+            }
+        };
 
-    let server_name = match unsafe { CStr::from_ptr(server_name) }.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            unsafe { set_error(out_error, "Invalid UTF-8 in server_name") };
-            return false;
-        }
-    };
+        let timeout = if timeout_secs == 0 {
+            std::time::Duration::from_secs(60) // Default 60 seconds for list
+        } else {
+            std::time::Duration::from_secs(timeout_secs as u64)
+        };
 
-    let workspace_token = if workspace_token.is_null() {
-        None
-    } else {
-        match unsafe { CStr::from_ptr(workspace_token) }.to_str() {
-            Ok(s) if !s.is_empty() => Some(s.to_string()),
-            _ => None,
-        }
-    };
+        let handle = unsafe { &*handle };
+        let router = handle.router.clone();
 
-    let timeout = if timeout_secs == 0 {
-        std::time::Duration::from_secs(60) // Default 60 seconds for list
-    } else {
-        std::time::Duration::from_secs(timeout_secs as u64)
-    };
+        let ctx = AsyncCallbackContext::new(callback, context);
 
-    let handle = unsafe { &*handle };
-    let router = handle.router.clone();
+        get_runtime().spawn_blocking(move || {
+            get_runtime().block_on(async move {
+                let router_read = router.read();
+                let workspace = router_read.find_workspace(workspace_token.as_deref());
 
-    let ctx = AsyncCallbackContext::new(callback, context);
+                let result = tokio::time::timeout(timeout, async {
+                    router_read.list_tools_for_server(&server_name, workspace.as_ref()).await
+                }).await;
 
-    get_runtime().spawn_blocking(move || {
-        get_runtime().block_on(async move {
-            let router_read = router.read();
-            let workspace = router_read.find_workspace(workspace_token.as_deref());
-
-            let result = tokio::time::timeout(timeout, async {
-                router_read.list_tools_for_server(&server_name, workspace.as_ref()).await
-            }).await;
-
-            match result {
-                Ok(Ok(tools)) => {
-                    match serde_json::to_string(&tools) {
-                        Ok(json) => {
-                            let json_cstr = CString::new(json)
-                                .unwrap_or_else(|_| CString::new("[]").unwrap());
-                            ctx.invoke(true, json_cstr.as_ptr(), std::ptr::null());
-                        }
-                        Err(e) => {
-                            let error_msg = CString::new(format!("Failed to serialize: {}", e))
-                                .unwrap_or_else(|_| CString::new("Serialization error").unwrap());
-                            ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
+                match result {
+                    Ok(Ok(tools)) => {
+                        match serde_json::to_string(&tools) {
+                            Ok(json) => {
+                                let json_cstr = CString::new(json)
+                                    .unwrap_or_else(|_| CString::new("[]").unwrap());
+                                ctx.invoke(true, json_cstr.as_ptr(), std::ptr::null());
+                            }
+                            Err(e) => {
+                                let error_msg = CString::new(format!("Failed to serialize: {}", e))
+                                    .unwrap_or_else(|_| CString::new("Serialization error").unwrap());
+                                ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
+                            }
                         }
                     }
+                    Ok(Err(e)) => {
+                        let error_msg = CString::new(format!("Failed to list tools: {}", e))
+                            .unwrap_or_else(|_| CString::new("List error").unwrap());
+                        ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
+                    }
+                    Err(_) => {
+                        let error_msg = CString::new(format!("List tools timed out after {} seconds", timeout.as_secs()))
+                            .unwrap_or_else(|_| CString::new("Timeout").unwrap());
+                        ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
+                    }
                 }
-                Ok(Err(e)) => {
-                    let error_msg = CString::new(format!("Failed to list tools: {}", e))
-                        .unwrap_or_else(|_| CString::new("List error").unwrap());
-                    ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
-                }
-                Err(_) => {
-                    let error_msg = CString::new(format!("List tools timed out after {} seconds", timeout.as_secs()))
-                        .unwrap_or_else(|_| CString::new("Timeout").unwrap());
-                    ctx.invoke(false, std::ptr::null(), error_msg.as_ptr());
-                }
-            }
-        })
-    });
+            })
+        });
 
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 // MARK: - Persistence: Settings
@@ -744,31 +635,18 @@ pub extern "C" fn mcp_router_list_tools_async(
 pub extern "C" fn mcp_router_load_settings(
     out_error: *mut *mut c_char,
 ) -> *mut c_char {
-    let manager = match RouterConfigManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            return std::ptr::null_mut();
-        }
-    };
+    ffi_boundary(out_error, std::ptr::null_mut(), || {
+        let manager = RouterConfigManager::new()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
 
-    match manager.load_settings() {
-        Ok(settings) => {
-            match serde_json::to_string(&settings) {
-                Ok(json) => CString::new(json)
-                    .map(|s| s.into_raw())
-                    .unwrap_or(std::ptr::null_mut()),
-                Err(e) => {
-                    unsafe { set_error(out_error, &e.to_string()) };
-                    std::ptr::null_mut()
-                }
-            }
-        }
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            std::ptr::null_mut()
-        }
-    }
+        let settings = manager.load_settings()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
+
+        let json = serde_json::to_string(&settings)
+            .map_err(|e| FfiError::custom(e.to_string()))?;
+
+        str_to_cstring(&json)
+    })
 }
 
 /// Save settings to ~/.vimo/mcp-router/settings.json
@@ -777,38 +655,20 @@ pub extern "C" fn mcp_router_save_settings(
     json: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if json.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        let json_str = unsafe { cstr_to_string(json)? };
 
-    let json_str = unsafe { CStr::from_ptr(json) }
-        .to_str()
-        .unwrap_or_default();
+        let settings: AppSettings = serde_json::from_str(&json_str)
+            .map_err(|e| FfiError::custom(format!("Invalid JSON: {}", e)))?;
 
-    let settings: AppSettings = match serde_json::from_str(json_str) {
-        Ok(s) => s,
-        Err(e) => {
-            unsafe { set_error(out_error, &format!("Invalid JSON: {}", e)) };
-            return false;
-        }
-    };
+        let manager = RouterConfigManager::new()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
 
-    let manager = match RouterConfigManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            return false;
-        }
-    };
+        manager.save_settings(&settings)
+            .map_err(|e| FfiError::custom(e.to_string()))?;
 
-    match manager.save_settings(&settings) {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+        Ok::<_, FfiError>(true)
+    })
 }
 
 // MARK: - Persistence: Workspaces
@@ -819,31 +679,21 @@ pub extern "C" fn mcp_router_load_workspaces_from_file(
     handle: *mut McpRouterHandle,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    let manager = match RouterConfigManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            return false;
-        }
-    };
+        let manager = RouterConfigManager::new()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
 
-    match manager.load_workspaces() {
-        Ok(workspaces) => {
-            let handle = unsafe { &mut *handle };
-            let mut router = handle.router.write();
-            router.load_workspaces(workspaces);
-            true
-        }
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+        let workspaces = manager.load_workspaces()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
+
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.load_workspaces(workspaces);
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Save workspaces from router to ~/.vimo/mcp-router/workspaces.json
@@ -852,32 +702,22 @@ pub extern "C" fn mcp_router_save_workspaces_to_file(
     handle: *mut McpRouterHandle,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    let handle = unsafe { &*handle };
-    let router = handle.router.read();
+        let handle = unsafe { &*handle };
+        let router = handle.router.read();
 
-    let manager = match RouterConfigManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            return false;
-        }
-    };
+        let manager = RouterConfigManager::new()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
 
-    // Get workspaces from router
-    let workspaces = router.workspaces();
+        let workspaces = router.workspaces();
 
-    match manager.save_workspaces(&workspaces) {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+        manager.save_workspaces(&workspaces)
+            .map_err(|e| FfiError::custom(e.to_string()))?;
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 // MARK: - Persistence: Claude Config
@@ -887,13 +727,10 @@ pub extern "C" fn mcp_router_save_workspaces_to_file(
 pub extern "C" fn mcp_router_is_installed_to_claude_global(
     out_error: *mut *mut c_char,
 ) -> bool {
-    match ClaudeConfigManager::is_installed() {
-        Ok(installed) => installed,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+    ffi_boundary(out_error, false, || {
+        ClaudeConfigManager::is_installed()
+            .map_err(|e| FfiError::custom(e.to_string()))
+    })
 }
 
 /// Install mcp-router to ~/.claude.json
@@ -902,13 +739,11 @@ pub extern "C" fn mcp_router_install_to_claude_global(
     port: u16,
     out_error: *mut *mut c_char,
 ) -> bool {
-    match ClaudeConfigManager::install(port) {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+    ffi_boundary(out_error, false, || {
+        ClaudeConfigManager::install(port)
+            .map(|()| true)
+            .map_err(|e| FfiError::custom(e.to_string()))
+    })
 }
 
 /// Uninstall mcp-router from ~/.claude.json
@@ -916,13 +751,11 @@ pub extern "C" fn mcp_router_install_to_claude_global(
 pub extern "C" fn mcp_router_uninstall_from_claude_global(
     out_error: *mut *mut c_char,
 ) -> bool {
-    match ClaudeConfigManager::uninstall() {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+    ffi_boundary(out_error, false, || {
+        ClaudeConfigManager::uninstall()
+            .map(|()| true)
+            .map_err(|e| FfiError::custom(e.to_string()))
+    })
 }
 
 /// Load servers from ~/.claude.json into router
@@ -931,23 +764,18 @@ pub extern "C" fn mcp_router_load_servers_from_claude_config(
     handle: *mut McpRouterHandle,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    match ClaudeConfigManager::read_servers() {
-        Ok(servers) => {
-            let handle = unsafe { &mut *handle };
-            let mut router = handle.router.write();
-            router.load_servers(servers);
-            true
-        }
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+        let servers = ClaudeConfigManager::read_servers()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
+
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        router.load_servers(servers);
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Load servers from ~/.vimo/mcp-router/servers.json into router (appends to existing)
@@ -956,34 +784,24 @@ pub extern "C" fn mcp_router_load_servers_from_router_config(
     handle: *mut McpRouterHandle,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    let manager = match RouterConfigManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            return false;
-        }
-    };
+        let manager = RouterConfigManager::new()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
 
-    match manager.load_servers() {
-        Ok(servers) => {
-            let handle = unsafe { &mut *handle };
-            let mut router = handle.router.write();
-            // Append servers (add_server handles deduplication by name)
-            for server in servers {
-                router.add_server(server);
-            }
-            true
+        let servers = manager.load_servers()
+            .map_err(|e| FfiError::custom(e.to_string()))?;
+
+        let handle = unsafe { &mut *handle };
+        let mut router = handle.router.write();
+        // Append servers (add_server handles deduplication by name)
+        for server in servers {
+            router.add_server(server);
         }
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Load servers from ~/.vimo/mcp-router/servers.json
@@ -994,34 +812,33 @@ pub extern "C" fn mcp_router_load_all_servers(
     handle: *mut McpRouterHandle,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() {
-        unsafe { set_error(out_error, "Invalid handle") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
 
-    // Auto-migrate from SwiftData if needed (servers.json doesn't exist)
-    match crate::persistence::auto_migrate_if_needed() {
-        Ok(count) if count > 0 => {
-            tracing::info!("Auto-migrated {} servers from SwiftData", count);
+        // Auto-migrate from SwiftData if needed (servers.json doesn't exist)
+        match crate::persistence::auto_migrate_if_needed() {
+            Ok(count) if count > 0 => {
+                tracing::info!("Auto-migrated {} servers from SwiftData", count);
+            }
+            Err(e) => {
+                tracing::warn!("SwiftData migration failed: {}", e);
+            }
+            _ => {}
         }
-        Err(e) => {
-            tracing::warn!("SwiftData migration failed: {}", e);
+
+        let handle_ref = unsafe { &mut *handle };
+        let mut router = handle_ref.router.write();
+
+        // Load from ~/.vimo/mcp-router/servers.json (our own managed servers)
+        if let Ok(manager) = RouterConfigManager::new() {
+            if let Ok(router_servers) = manager.load_servers() {
+                router.load_servers(router_servers);
+                tracing::info!("Loaded {} servers from servers.json", router.server_configs().len());
+            }
         }
-        _ => {}
-    }
 
-    let handle_ref = unsafe { &mut *handle };
-    let mut router = handle_ref.router.write();
-
-    // Load from ~/.vimo/mcp-router/servers.json (our own managed servers)
-    if let Ok(manager) = RouterConfigManager::new() {
-        if let Ok(router_servers) = manager.load_servers() {
-            router.load_servers(router_servers);
-            tracing::info!("Loaded {} servers from servers.json", router.server_configs().len());
-        }
-    }
-
-    true
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Add server to both router and config file
@@ -1033,56 +850,36 @@ pub extern "C" fn mcp_router_add_server_and_persist(
     target: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || json.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let json_str = unsafe { cstr_to_string(json)? };
 
-    let json_str = unsafe { CStr::from_ptr(json) }
-        .to_str()
-        .unwrap_or_default();
+        let config: ServerConfig = serde_json::from_str(&json_str)
+            .map_err(|e| FfiError::custom(format!("Invalid JSON: {}", e)))?;
 
-    let config: ServerConfig = match serde_json::from_str(json_str) {
-        Ok(c) => c,
-        Err(e) => {
-            unsafe { set_error(out_error, &format!("Invalid JSON: {}", e)) };
-            return false;
+        let target_str = unsafe { cstr_to_str_or(target, "global") };
+
+        // Add to router
+        let handle = unsafe { &mut *handle };
+        {
+            let mut router = handle.router.write();
+            router.add_server(config.clone());
         }
-    };
 
-    let target_str = if target.is_null() {
-        "global"
-    } else {
-        unsafe { CStr::from_ptr(target) }
-            .to_str()
-            .unwrap_or("global")
-    };
-
-    // Add to router
-    let handle = unsafe { &mut *handle };
-    {
-        let mut router = handle.router.write();
-        router.add_server(config.clone());
-    }
-
-    // Persist based on target
-    let result = if target_str == "global" {
-        ClaudeConfigManager::upsert_server(&config)
-    } else if target_str.starts_with("project:") {
-        let project_path = &target_str[8..];
-        McpConfigManager::upsert_server(std::path::Path::new(project_path), &config)
-    } else {
-        unsafe { set_error(out_error, "Invalid target: use 'global' or 'project:/path'") };
-        return false;
-    };
-
-    match result {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
+        // Persist based on target
+        if target_str == "global" {
+            ClaudeConfigManager::upsert_server(&config)
+                .map_err(|e| FfiError::custom(e.to_string()))?;
+        } else if target_str.starts_with("project:") {
+            let project_path = &target_str[8..];
+            McpConfigManager::upsert_server(std::path::Path::new(project_path), &config)
+                .map_err(|e| FfiError::custom(e.to_string()))?;
+        } else {
+            return Err(FfiError::custom("Invalid target: use 'global' or 'project:/path'"));
         }
-    }
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 /// Remove server from both router and config file
@@ -1093,48 +890,33 @@ pub extern "C" fn mcp_router_remove_server_and_persist(
     target: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if handle.is_null() || name.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        check_not_null(handle)?;
+        let name_str = unsafe { cstr_to_string(name)? };
 
-    let name_str = unsafe { CStr::from_ptr(name) }
-        .to_str()
-        .unwrap_or_default();
+        let target_str = unsafe { cstr_to_str_or(target, "global") };
 
-    let target_str = if target.is_null() {
-        "global"
-    } else {
-        unsafe { CStr::from_ptr(target) }
-            .to_str()
-            .unwrap_or("global")
-    };
-
-    // Remove from router
-    let handle = unsafe { &mut *handle };
-    {
-        let mut router = handle.router.write();
-        router.remove_server(name_str);
-    }
-
-    // Remove from config file
-    let result = if target_str == "global" {
-        ClaudeConfigManager::remove_server(name_str)
-    } else if target_str.starts_with("project:") {
-        let project_path = &target_str[8..];
-        McpConfigManager::remove_server(std::path::Path::new(project_path), name_str)
-    } else {
-        unsafe { set_error(out_error, "Invalid target: use 'global' or 'project:/path'") };
-        return false;
-    };
-
-    match result {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
+        // Remove from router
+        let handle = unsafe { &mut *handle };
+        {
+            let mut router = handle.router.write();
+            router.remove_server(&name_str);
         }
-    }
+
+        // Remove from config file
+        if target_str == "global" {
+            ClaudeConfigManager::remove_server(&name_str)
+                .map_err(|e| FfiError::custom(e.to_string()))?;
+        } else if target_str.starts_with("project:") {
+            let project_path = &target_str[8..];
+            McpConfigManager::remove_server(std::path::Path::new(project_path), &name_str)
+                .map_err(|e| FfiError::custom(e.to_string()))?;
+        } else {
+            return Err(FfiError::custom("Invalid target: use 'global' or 'project:/path'"));
+        }
+
+        Ok::<_, FfiError>(true)
+    })
 }
 
 // MARK: - Persistence: Project Config
@@ -1147,26 +929,14 @@ pub extern "C" fn mcp_router_install_to_project(
     port: u16,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if project_path.is_null() || token.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        let path_str = unsafe { cstr_to_string(project_path)? };
+        let token_str = unsafe { cstr_to_string(token)? };
 
-    let path_str = unsafe { CStr::from_ptr(project_path) }
-        .to_str()
-        .unwrap_or_default();
-
-    let token_str = unsafe { CStr::from_ptr(token) }
-        .to_str()
-        .unwrap_or_default();
-
-    match McpConfigManager::install(std::path::Path::new(path_str), token_str, port) {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+        McpConfigManager::install(std::path::Path::new(&path_str), &token_str, port)
+            .map(|()| true)
+            .map_err(|e| FfiError::custom(e.to_string()))
+    })
 }
 
 /// Uninstall mcp-router from project .mcp.json
@@ -1175,22 +945,13 @@ pub extern "C" fn mcp_router_uninstall_from_project(
     project_path: *const c_char,
     out_error: *mut *mut c_char,
 ) -> bool {
-    if project_path.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return false;
-    }
+    ffi_boundary(out_error, false, || {
+        let path_str = unsafe { cstr_to_string(project_path)? };
 
-    let path_str = unsafe { CStr::from_ptr(project_path) }
-        .to_str()
-        .unwrap_or_default();
-
-    match McpConfigManager::uninstall(std::path::Path::new(path_str)) {
-        Ok(_) => true,
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            false
-        }
-    }
+        McpConfigManager::uninstall(std::path::Path::new(&path_str))
+            .map(|()| true)
+            .map_err(|e| FfiError::custom(e.to_string()))
+    })
 }
 
 /// Get workspace token from project .mcp.json
@@ -1200,23 +961,106 @@ pub extern "C" fn mcp_router_get_project_token(
     project_path: *const c_char,
     out_error: *mut *mut c_char,
 ) -> *mut c_char {
-    if project_path.is_null() {
-        unsafe { set_error(out_error, "Invalid arguments") };
-        return std::ptr::null_mut();
-    }
+    ffi_boundary(out_error, std::ptr::null_mut(), || {
+        let path_str = unsafe { cstr_to_string(project_path)? };
 
-    let path_str = unsafe { CStr::from_ptr(project_path) }
-        .to_str()
-        .unwrap_or_default();
-
-    match McpConfigManager::get_token(std::path::Path::new(path_str)) {
-        Ok(Some(token)) => CString::new(token)
-            .map(|s| s.into_raw())
-            .unwrap_or(std::ptr::null_mut()),
-        Ok(None) => std::ptr::null_mut(),
-        Err(e) => {
-            unsafe { set_error(out_error, &e.to_string()) };
-            std::ptr::null_mut()
+        match McpConfigManager::get_token(std::path::Path::new(&path_str)) {
+            Ok(Some(token)) => str_to_cstring(&token),
+            Ok(None) => Ok(std::ptr::null_mut()),
+            Err(e) => Err(FfiError::custom(e.to_string())),
         }
-    }
+    })
+}
+
+// MARK: - Persistence: Gemini Config
+
+/// Check if mcp-router is installed in ~/.gemini/settings.json
+#[no_mangle]
+pub extern "C" fn mcp_router_is_installed_to_gemini_global(
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || GeminiConfigManager::is_installed())
+}
+
+/// Install mcp-router to ~/.gemini/settings.json
+#[no_mangle]
+pub extern "C" fn mcp_router_install_to_gemini_global(
+    port: u16,
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || {
+        GeminiConfigManager::install(port).map(|()| true)
+    })
+}
+
+/// Uninstall mcp-router from ~/.gemini/settings.json
+#[no_mangle]
+pub extern "C" fn mcp_router_uninstall_from_gemini_global(
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || {
+        GeminiConfigManager::uninstall().map(|()| true)
+    })
+}
+
+// MARK: - Persistence: OpenCode Config
+
+/// Check if mcp-router is installed in ~/.config/opencode/opencode.json
+#[no_mangle]
+pub extern "C" fn mcp_router_is_installed_to_opencode_global(
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || OpenCodeConfigManager::is_installed())
+}
+
+/// Install mcp-router to ~/.config/opencode/opencode.json
+#[no_mangle]
+pub extern "C" fn mcp_router_install_to_opencode_global(
+    port: u16,
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || {
+        OpenCodeConfigManager::install(port).map(|()| true)
+    })
+}
+
+/// Uninstall mcp-router from ~/.config/opencode/opencode.json
+#[no_mangle]
+pub extern "C" fn mcp_router_uninstall_from_opencode_global(
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || {
+        OpenCodeConfigManager::uninstall().map(|()| true)
+    })
+}
+
+// MARK: - Persistence: Codex Config
+
+/// Check if mcp-router is installed in ~/.codex/config.toml
+#[no_mangle]
+pub extern "C" fn mcp_router_is_installed_to_codex_global(
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || CodexConfigManager::is_installed())
+}
+
+/// Install mcp-router to ~/.codex/config.toml
+#[no_mangle]
+pub extern "C" fn mcp_router_install_to_codex_global(
+    port: u16,
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || {
+        CodexConfigManager::install(port).map(|()| true)
+    })
+}
+
+/// Uninstall mcp-router from ~/.codex/config.toml
+#[no_mangle]
+pub extern "C" fn mcp_router_uninstall_from_codex_global(
+    out_error: *mut *mut c_char,
+) -> bool {
+    ffi_boundary(out_error, false, || {
+        CodexConfigManager::uninstall().map(|()| true)
+    })
 }

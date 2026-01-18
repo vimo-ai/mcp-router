@@ -21,6 +21,8 @@ protocol GlobalConfigProvider: Identifiable {
 enum GlobalConfigProviders {
     static let all: [any GlobalConfigProvider] = [
         ClaudeGlobalConfigProvider(),
-        CodexGlobalConfigProvider()
+        CodexGlobalConfigProvider(),
+        GeminiGlobalConfigProvider(),
+        OpenCodeGlobalConfigProvider()
     ]
 }

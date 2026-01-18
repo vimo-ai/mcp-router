@@ -90,7 +90,7 @@ char *mcp_router_list_servers(struct McpRouterHandle *handle);
 bool mcp_router_remove_server(struct McpRouterHandle *handle, const char *name, char **out_error);
 
 /**
- * Set server enabled/disabled
+ * Set server enabled/disabled and persist to servers.json
  */
 bool mcp_router_set_server_enabled(struct McpRouterHandle *handle,
                                    const char *name,
@@ -98,7 +98,7 @@ bool mcp_router_set_server_enabled(struct McpRouterHandle *handle,
                                    char **out_error);
 
 /**
- * Set server flatten mode
+ * Set server flatten mode and persist to servers.json
  */
 bool mcp_router_set_server_flatten_mode(struct McpRouterHandle *handle,
                                         const char *name,
@@ -234,9 +234,9 @@ bool mcp_router_load_servers_from_claude_config(struct McpRouterHandle *handle, 
 bool mcp_router_load_servers_from_router_config(struct McpRouterHandle *handle, char **out_error);
 
 /**
- * Load servers from both sources: ~/.claude.json first, then ~/.vimo/mcp-router/servers.json
- * Servers from servers.json override those from claude.json if same name
+ * Load servers from ~/.vimo/mcp-router/servers.json
  * Also auto-migrates from SwiftData if servers.json doesn't exist
+ * NOTE: ~/.claude.json is NOT read here - Claude Code reads it directly
  */
 bool mcp_router_load_all_servers(struct McpRouterHandle *handle, char **out_error);
 
@@ -275,5 +275,50 @@ bool mcp_router_uninstall_from_project(const char *project_path, char **out_erro
  * Returns token string or null if not found
  */
 char *mcp_router_get_project_token(const char *project_path, char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.gemini/settings.json
+ */
+bool mcp_router_is_installed_to_gemini_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.gemini/settings.json
+ */
+bool mcp_router_install_to_gemini_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.gemini/settings.json
+ */
+bool mcp_router_uninstall_from_gemini_global(char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.config/opencode/opencode.json
+ */
+bool mcp_router_is_installed_to_opencode_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.config/opencode/opencode.json
+ */
+bool mcp_router_install_to_opencode_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.config/opencode/opencode.json
+ */
+bool mcp_router_uninstall_from_opencode_global(char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.codex/config.toml
+ */
+bool mcp_router_is_installed_to_codex_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.codex/config.toml
+ */
+bool mcp_router_install_to_codex_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.codex/config.toml
+ */
+bool mcp_router_uninstall_from_codex_global(char **out_error);
 
 #endif  /* MCP_ROUTER_CORE_H */

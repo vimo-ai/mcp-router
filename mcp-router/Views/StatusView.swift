@@ -6,9 +6,28 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct StatusView: View {
     @EnvironmentObject var router: MCPRouter
+    @Query private var appSettings: [AppSettings]
+
+    private var serverPort: Int {
+        appSettings.first?.serverPort ?? 19104
+    }
+
+    private var configurationCode: String {
+        """
+        {
+          "mcpServers": {
+            "mcp-router": {
+              "type": "http",
+              "url": "http://localhost:\(serverPort)"
+            }
+          }
+        }
+        """
+    }
 
     var body: some View {
         NavigationStack {
@@ -45,7 +64,7 @@ struct StatusView: View {
                         .font(.headline)
                 }
 
-                Text("http://localhost:3000")
+                Text("http://localhost:\(serverPort)")
                     .font(.system(.body, design: .monospaced))
                     .foregroundColor(.secondary)
             }
@@ -83,16 +102,7 @@ struct StatusView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            CodeBlockView(code: """
-            {
-              "mcpServers": {
-                "mcp-router": {
-                  "type": "http",
-                  "url": "http://localhost:3000"
-                }
-              }
-            }
-            """)
+            CodeBlockView(code: configurationCode)
 
             Button("Copy Configuration") {
                 copyConfiguration()
@@ -105,20 +115,9 @@ struct StatusView: View {
     }
 
     private func copyConfiguration() {
-        let config = """
-        {
-          "mcpServers": {
-            "mcp-router": {
-              "type": "http",
-              "url": "http://localhost:3000"
-            }
-          }
-        }
-        """
-
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(config, forType: .string)
+        pasteboard.setString(configurationCode, forType: .string)
     }
 }
 

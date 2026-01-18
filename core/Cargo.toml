@@ -29,6 +29,9 @@ rmcp = { version = "0.1", features = ["client", "transport-child-process", "tran
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# TOML (for Codex config)
+toml = "0.8"
+
 # Process management - tokio has built-in process support
 # No additional crate needed, using tokio::process
 
@@ -49,6 +52,8 @@ dirs = "5"
 
 # FFI
 libc = "0.2"
+# TODO: 发布后改回 git 依赖
+vimo-ffi = { path = "../../../vimo-rust/vimo-ffi" }
 
 [build-dependencies]
 cbindgen = "0.27"
@@ -60,10 +65,12 @@ tempfile = "3"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# FFI 库必须用 unwind 才能 catch_unwind
+panic = "unwind"
 
 [profile.dev]
-panic = "abort"
+# FFI 库必须用 unwind 才能 catch_unwind
+panic = "unwind"
 
 # 开发时的快速编译 profile（与 sugarloaf-ffi 保持一致）
 [profile.dev-fast]

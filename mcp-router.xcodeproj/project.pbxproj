@@ -437,8 +437,17 @@
 					"@executable_path/../Frameworks",
 					"$(SRCROOT)/mcp-router/Lib",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/mcp-router/Lib",
+					"$(PROJECT_DIR)/mcp-router/Lib",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = "0.0.2-beta.15";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lmcp_router_core",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-router";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -452,20 +461,9 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/mcp-router/Lib";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/mcp-router/Lib",
-				);
-				SWIFT_INCLUDE_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/mcp-router/Lib",
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-lmcp_router_core",
-				);
 			};
 			name = Debug;
 		};
@@ -500,8 +498,17 @@
 					"@executable_path/../Frameworks",
 					"$(SRCROOT)/mcp-router/Lib",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/mcp-router/Lib",
+					"$(PROJECT_DIR)/mcp-router/Lib",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = "0.0.2-beta.15";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lmcp_router_core",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.higuaifan.mcp-router";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -515,20 +522,9 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/mcp-router/Lib";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/mcp-router/Lib",
-				);
-				SWIFT_INCLUDE_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/mcp-router/Lib",
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-lmcp_router_core",
-				);
 			};
 			name = Release;
 		};

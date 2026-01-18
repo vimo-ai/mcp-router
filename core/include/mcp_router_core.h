@@ -276,4 +276,49 @@ bool mcp_router_uninstall_from_project(const char *project_path, char **out_erro
  */
 char *mcp_router_get_project_token(const char *project_path, char **out_error);
 
+/**
+ * Check if mcp-router is installed in ~/.gemini/settings.json
+ */
+bool mcp_router_is_installed_to_gemini_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.gemini/settings.json
+ */
+bool mcp_router_install_to_gemini_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.gemini/settings.json
+ */
+bool mcp_router_uninstall_from_gemini_global(char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.config/opencode/opencode.json
+ */
+bool mcp_router_is_installed_to_opencode_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.config/opencode/opencode.json
+ */
+bool mcp_router_install_to_opencode_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.config/opencode/opencode.json
+ */
+bool mcp_router_uninstall_from_opencode_global(char **out_error);
+
+/**
+ * Check if mcp-router is installed in ~/.codex/config.toml
+ */
+bool mcp_router_is_installed_to_codex_global(char **out_error);
+
+/**
+ * Install mcp-router to ~/.codex/config.toml
+ */
+bool mcp_router_install_to_codex_global(uint16_t port, char **out_error);
+
+/**
+ * Uninstall mcp-router from ~/.codex/config.toml
+ */
+bool mcp_router_uninstall_from_codex_global(char **out_error);
+
 #endif  /* MCP_ROUTER_CORE_H */

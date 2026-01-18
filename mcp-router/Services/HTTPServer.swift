@@ -59,7 +59,7 @@ actor HTTPServer {
     // Session 管理：存储每个连接的会话 ID
     private var sessions: [String: Date] = [:]  // sessionId -> 创建时间
 
-    init(port: UInt16 = 3000, router: MCPRouter, exposeManagementTools: Bool = false) {
+    init(port: UInt16 = 19104, router: MCPRouter, exposeManagementTools: Bool = false) {
         self.port = port
         self.router = router
         self.exposeManagementTools = exposeManagementTools

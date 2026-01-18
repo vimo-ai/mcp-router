@@ -10,17 +10,14 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::config::{ServerConfig, ServerType, StdioProtocol};
+use crate::config::{ServerConfig, ServerType};
 use super::PersistenceError;
 
 /// Get the Claude config file path: ~/.claude.json
-fn get_claude_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".claude.json"))
-}
-
-/// Get the backup file path: ~/.claude.json.backup
-fn get_backup_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".claude.json.backup"))
+fn get_config_path() -> Result<PathBuf, PersistenceError> {
+    dirs::home_dir()
+        .map(|home| home.join(".claude.json"))
+        .ok_or(PersistenceError::HomeDirNotFound)
 }
 
 /// MCP Server configuration in Claude format
@@ -70,8 +67,7 @@ pub struct ClaudeConfigManager;
 impl ClaudeConfigManager {
     /// Check if mcp-router is installed in global config
     pub fn is_installed() -> Result<bool, PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Ok(false);
@@ -89,8 +85,7 @@ impl ClaudeConfigManager {
 
     /// Install mcp-router to global config
     pub fn install(port: u16) -> Result<(), PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Err(PersistenceError::FileNotFound(path.display().to_string()));
@@ -98,7 +93,7 @@ impl ClaudeConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(&path)?;
-        Self::create_backup(&content)?;
+        super::create_backup(&path, &content)?;
 
         // Parse JSON
         let mut json: Value = serde_json::from_str(&content)
@@ -110,7 +105,7 @@ impl ClaudeConfigManager {
                 json["mcpServers"] = json!({});
             }
             Some(v) if !v.is_object() => {
-                Self::remove_backup();
+                super::remove_backup(&path);
                 return Err(PersistenceError::InvalidFormat(
                     "mcpServers must be an object".to_string(),
                 ));
@@ -128,18 +123,17 @@ impl ClaudeConfigManager {
 
         // Write back with pretty formatting
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&path, &output)?;
+        super::atomic_write(&path, &output)?;
 
         // Remove backup on success
-        Self::remove_backup();
+        super::remove_backup(&path);
 
         Ok(())
     }
 
     /// Uninstall mcp-router from global config
     pub fn uninstall() -> Result<(), PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Ok(());
@@ -147,7 +141,7 @@ impl ClaudeConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(&path)?;
-        Self::create_backup(&content)?;
+        super::create_backup(&path, &content)?;
 
         // Parse JSON
         let mut json: Value = serde_json::from_str(&content)
@@ -160,17 +154,16 @@ impl ClaudeConfigManager {
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&path, &output)?;
+        super::atomic_write(&path, &output)?;
 
-        Self::remove_backup();
+        super::remove_backup(&path);
 
         Ok(())
     }
 
     /// Read all MCP servers from global config
     pub fn read_servers() -> Result<Vec<ServerConfig>, PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Ok(Vec::new());
@@ -187,7 +180,7 @@ impl ClaudeConfigManager {
 
         let mut result = Vec::new();
         for (name, config) in servers {
-            if let Some(server_config) = Self::parse_server_config(&name, &config) {
+            if let Some(server_config) = super::parse_server_config(&name, &config) {
                 result.push(server_config);
             }
         }
@@ -197,8 +190,7 @@ impl ClaudeConfigManager {
 
     /// Add or update a server in global config
     pub fn upsert_server(config: &ServerConfig) -> Result<(), PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Err(PersistenceError::FileNotFound(path.display().to_string()));
@@ -206,7 +198,7 @@ impl ClaudeConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(&path)?;
-        Self::create_backup(&content)?;
+        super::create_backup(&path, &content)?;
 
         // Parse JSON
         let mut json: Value = serde_json::from_str(&content)
@@ -218,7 +210,7 @@ impl ClaudeConfigManager {
                 json["mcpServers"] = json!({});
             }
             Some(v) if !v.is_object() => {
-                Self::remove_backup();
+                super::remove_backup(&path);
                 return Err(PersistenceError::InvalidFormat(
                     "mcpServers must be an object".to_string(),
                 ));
@@ -234,17 +226,16 @@ impl ClaudeConfigManager {
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&path, &output)?;
+        super::atomic_write(&path, &output)?;
 
-        Self::remove_backup();
+        super::remove_backup(&path);
 
         Ok(())
     }
 
     /// Remove a server from global config
     pub fn remove_server(name: &str) -> Result<(), PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Err(PersistenceError::FileNotFound(path.display().to_string()));
@@ -252,7 +243,7 @@ impl ClaudeConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(&path)?;
-        Self::create_backup(&content)?;
+        super::create_backup(&path, &content)?;
 
         // Parse JSON
         let mut json: Value = serde_json::from_str(&content)
@@ -266,23 +257,22 @@ impl ClaudeConfigManager {
         };
 
         if !removed {
-            Self::remove_backup();
+            super::remove_backup(&path);
             return Err(PersistenceError::ServerNotFound(name.to_string()));
         }
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&path, &output)?;
+        super::atomic_write(&path, &output)?;
 
-        Self::remove_backup();
+        super::remove_backup(&path);
 
         Ok(())
     }
 
     /// Check if a specific server exists
     pub fn has_server(name: &str) -> Result<bool, PersistenceError> {
-        let path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
+        let path = get_config_path()?;
 
         if !path.exists() {
             return Ok(false);
@@ -300,139 +290,16 @@ impl ClaudeConfigManager {
         Ok(has)
     }
 
-    // MARK: - Private helpers
-
-    fn parse_server_config(name: &str, config: &Value) -> Option<ServerConfig> {
-        // Check if it's HTTP type
-        if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
-            let headers: HashMap<String, String> = config.get("headers")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            return Some(ServerConfig {
-                name: name.to_string(),
-                server_type: ServerType::Http,
-                description: String::new(),
-                is_enabled: true,
-                flatten_mode: false,
-                url: Some(url.to_string()),
-                headers,
-                command: None,
-                args: Vec::new(),
-                env: HashMap::new(),
-                stdio_protocol: StdioProtocol::default(),
-            });
-        }
-
-        // Check if it's stdio type
-        if let Some(command) = config.get("command").and_then(|v| v.as_str()) {
-            let args: Vec<String> = config.get("args")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            let env: HashMap<String, String> = config.get("env")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            return Some(ServerConfig {
-                name: name.to_string(),
-                server_type: ServerType::Stdio,
-                description: String::new(),
-                is_enabled: true,
-                flatten_mode: false,
-                url: None,
-                headers: HashMap::new(),
-                command: Some(command.to_string()),
-                args,
-                env,
-                stdio_protocol: StdioProtocol::default(),
-            });
-        }
-
-        None
-    }
-
-    fn create_backup(content: &str) -> Result<(), PersistenceError> {
-        if let Some(backup_path) = get_backup_path() {
-            fs::write(&backup_path, content)?;
-        }
-        Ok(())
-    }
-
-    fn remove_backup() {
-        if let Some(backup_path) = get_backup_path() {
-            let _ = fs::remove_file(&backup_path);
-        }
-    }
-
-    fn atomic_write(path: &PathBuf, content: &str) -> Result<(), PersistenceError> {
-        let temp_path = path.with_extension("json.tmp");
-        fs::write(&temp_path, content)?;
-        fs::rename(&temp_path, path)?;
-        Ok(())
-    }
-
     /// Restore from backup if it exists
     pub fn restore_backup() -> Result<(), PersistenceError> {
-        let backup_path = get_backup_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
-
-        if !backup_path.exists() {
-            return Err(PersistenceError::BackupNotFound);
-        }
-
-        let config_path = get_claude_config_path()
-            .ok_or(PersistenceError::HomeDirNotFound)?;
-
-        fs::copy(&backup_path, &config_path)?;
-        fs::remove_file(&backup_path)?;
-
-        Ok(())
+        let path = get_config_path()?;
+        super::restore_backup(&path)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-
-    // Note: These tests require a mock home directory setup
-    // For now, just testing the parsing logic
-
-    #[test]
-    fn test_parse_http_server() {
-        let config = json!({
-            "type": "http",
-            "url": "http://localhost:8080",
-            "headers": {
-                "X-API-Key": "test"
-            }
-        });
-
-        let server = ClaudeConfigManager::parse_server_config("test-server", &config).unwrap();
-        assert_eq!(server.name, "test-server");
-        assert_eq!(server.server_type, ServerType::Http);
-        assert_eq!(server.url, Some("http://localhost:8080".to_string()));
-        assert_eq!(server.headers.get("X-API-Key"), Some(&"test".to_string()));
-    }
-
-    #[test]
-    fn test_parse_stdio_server() {
-        let config = json!({
-            "command": "npx",
-            "args": ["-y", "@mcp/server"],
-            "env": {
-                "NODE_ENV": "production"
-            }
-        });
-
-        let server = ClaudeConfigManager::parse_server_config("test-server", &config).unwrap();
-        assert_eq!(server.name, "test-server");
-        assert_eq!(server.server_type, ServerType::Stdio);
-        assert_eq!(server.command, Some("npx".to_string()));
-        assert_eq!(server.args, vec!["-y", "@mcp/server"]);
-        assert_eq!(server.env.get("NODE_ENV"), Some(&"production".to_string()));
-    }
 
     #[test]
     fn test_server_config_to_claude_format() {

@@ -2,13 +2,12 @@
 //!
 //! Handles reading/writing of `.mcp.json` files in project directories.
 
-use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::config::{ServerConfig, ServerType, StdioProtocol};
+use crate::config::{ServerConfig, ServerType};
 use super::PersistenceError;
 
 const MCP_CONFIG_FILE: &str = ".mcp.json";
@@ -93,7 +92,7 @@ impl McpConfigManager {
 
         // Write back with pretty formatting
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&config_path, &output)?;
+        super::atomic_write(&config_path, &output)?;
 
         Ok(())
     }
@@ -123,7 +122,7 @@ impl McpConfigManager {
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&config_path, &output)?;
+        super::atomic_write(&config_path, &output)?;
 
         Ok(())
     }
@@ -151,7 +150,7 @@ impl McpConfigManager {
             if name == "mcp-router" {
                 continue;
             }
-            if let Some(server_config) = Self::parse_server_config(&name, &config) {
+            if let Some(server_config) = super::parse_server_config(&name, &config) {
                 result.push(server_config);
             }
         }
@@ -183,7 +182,7 @@ impl McpConfigManager {
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&config_path, &output)?;
+        super::atomic_write(&config_path, &output)?;
 
         Ok(())
     }
@@ -213,62 +212,12 @@ impl McpConfigManager {
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        Self::atomic_write(&config_path, &output)?;
+        super::atomic_write(&config_path, &output)?;
 
         Ok(())
     }
 
     // MARK: - Private helpers
-
-    fn parse_server_config(name: &str, config: &Value) -> Option<ServerConfig> {
-        // Check if it's HTTP type
-        if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
-            let headers: HashMap<String, String> = config.get("headers")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            return Some(ServerConfig {
-                name: name.to_string(),
-                server_type: ServerType::Http,
-                description: String::new(),
-                is_enabled: true,
-                flatten_mode: false,
-                url: Some(url.to_string()),
-                headers,
-                command: None,
-                args: Vec::new(),
-                env: HashMap::new(),
-                stdio_protocol: StdioProtocol::default(),
-            });
-        }
-
-        // Check if it's stdio type
-        if let Some(command) = config.get("command").and_then(|v| v.as_str()) {
-            let args: Vec<String> = config.get("args")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            let env: HashMap<String, String> = config.get("env")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            return Some(ServerConfig {
-                name: name.to_string(),
-                server_type: ServerType::Stdio,
-                description: String::new(),
-                is_enabled: true,
-                flatten_mode: false,
-                url: None,
-                headers: HashMap::new(),
-                command: Some(command.to_string()),
-                args,
-                env,
-                stdio_protocol: StdioProtocol::default(),
-            });
-        }
-
-        None
-    }
 
     fn server_config_to_value(config: &ServerConfig) -> Value {
         match config.server_type {
@@ -295,13 +244,6 @@ impl McpConfigManager {
                 obj
             }
         }
-    }
-
-    fn atomic_write(path: &PathBuf, content: &str) -> Result<(), PersistenceError> {
-        let temp_path = path.with_extension("json.tmp");
-        fs::write(&temp_path, content)?;
-        fs::rename(&temp_path, path)?;
-        Ok(())
     }
 }
 

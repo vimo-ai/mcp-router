@@ -78,7 +78,7 @@ impl OpenCodeConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(path)?;
-        super::create_backup(&path.to_path_buf(), &content)?;
+        super::create_backup(path, &content)?;
 
         // Parse JSON
         let mut json: Value = serde_json::from_str(&content)
@@ -90,7 +90,7 @@ impl OpenCodeConfigManager {
                 json["mcp"] = json!({});
             }
             Some(v) if !v.is_object() => {
-                super::remove_backup(&path.to_path_buf());
+                super::remove_backup(path);
                 return Err(PersistenceError::InvalidFormat(
                     "mcp must be an object".to_string(),
                 ));
@@ -108,9 +108,9 @@ impl OpenCodeConfigManager {
 
         // Write back with pretty formatting
         let output = serde_json::to_string_pretty(&json)?;
-        super::atomic_write(&path.to_path_buf(), &output)?;
+        super::atomic_write(path, &output)?;
 
-        super::remove_backup(&path.to_path_buf());
+        super::remove_backup(path);
 
         Ok(())
     }
@@ -122,7 +122,7 @@ impl OpenCodeConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(path)?;
-        super::create_backup(&path.to_path_buf(), &content)?;
+        super::create_backup(path, &content)?;
 
         // Parse JSON
         let mut json: Value = serde_json::from_str(&content)
@@ -135,9 +135,9 @@ impl OpenCodeConfigManager {
 
         // Write back
         let output = serde_json::to_string_pretty(&json)?;
-        super::atomic_write(&path.to_path_buf(), &output)?;
+        super::atomic_write(path, &output)?;
 
-        super::remove_backup(&path.to_path_buf());
+        super::remove_backup(path);
 
         Ok(())
     }
@@ -147,7 +147,7 @@ impl OpenCodeConfigManager {
         path: &Path,
         port: u16,
     ) -> Result<(), PersistenceError> {
-        super::ensure_dir_exists(&dir.to_path_buf())?;
+        super::ensure_dir_exists(dir)?;
 
         let config = json!({
             "mcp": {
@@ -159,7 +159,7 @@ impl OpenCodeConfigManager {
         });
 
         let output = serde_json::to_string_pretty(&config)?;
-        super::atomic_write(&path.to_path_buf(), &output)?;
+        super::atomic_write(path, &output)?;
 
         Ok(())
     }

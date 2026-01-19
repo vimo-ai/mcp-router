@@ -7,6 +7,11 @@
 //! - Returns `bool` (true = success, false = failure)
 //! - `out_error: *mut *mut c_char` receives error message on failure (caller must free)
 
+// FFI functions dereference raw pointers by design - this is expected for C-compatible APIs
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+// parking_lot::RwLock guards are Send-safe, and these are short-lived operations
+#![allow(clippy::await_holding_lock)]
+
 use crate::config::{AppSettings, ServerConfig, Workspace};
 use crate::get_runtime;
 use crate::persistence::{
@@ -870,8 +875,7 @@ pub extern "C" fn mcp_router_add_server_and_persist(
         if target_str == "global" {
             ClaudeConfigManager::upsert_server(&config)
                 .map_err(|e| FfiError::custom(e.to_string()))?;
-        } else if target_str.starts_with("project:") {
-            let project_path = &target_str[8..];
+        } else if let Some(project_path) = target_str.strip_prefix("project:") {
             McpConfigManager::upsert_server(std::path::Path::new(project_path), &config)
                 .map_err(|e| FfiError::custom(e.to_string()))?;
         } else {
@@ -907,8 +911,7 @@ pub extern "C" fn mcp_router_remove_server_and_persist(
         if target_str == "global" {
             ClaudeConfigManager::remove_server(&name_str)
                 .map_err(|e| FfiError::custom(e.to_string()))?;
-        } else if target_str.starts_with("project:") {
-            let project_path = &target_str[8..];
+        } else if let Some(project_path) = target_str.strip_prefix("project:") {
             McpConfigManager::remove_server(std::path::Path::new(project_path), &name_str)
                 .map_err(|e| FfiError::custom(e.to_string()))?;
         } else {
@@ -979,7 +982,7 @@ pub extern "C" fn mcp_router_get_project_token(
 pub extern "C" fn mcp_router_is_installed_to_gemini_global(
     out_error: *mut *mut c_char,
 ) -> bool {
-    ffi_boundary(out_error, false, || GeminiConfigManager::is_installed())
+    ffi_boundary(out_error, false, GeminiConfigManager::is_installed)
 }
 
 /// Install mcp-router to ~/.gemini/settings.json
@@ -1010,7 +1013,7 @@ pub extern "C" fn mcp_router_uninstall_from_gemini_global(
 pub extern "C" fn mcp_router_is_installed_to_opencode_global(
     out_error: *mut *mut c_char,
 ) -> bool {
-    ffi_boundary(out_error, false, || OpenCodeConfigManager::is_installed())
+    ffi_boundary(out_error, false, OpenCodeConfigManager::is_installed)
 }
 
 /// Install mcp-router to ~/.config/opencode/opencode.json
@@ -1041,7 +1044,7 @@ pub extern "C" fn mcp_router_uninstall_from_opencode_global(
 pub extern "C" fn mcp_router_is_installed_to_codex_global(
     out_error: *mut *mut c_char,
 ) -> bool {
-    ffi_boundary(out_error, false, || CodexConfigManager::is_installed())
+    ffi_boundary(out_error, false, CodexConfigManager::is_installed)
 }
 
 /// Install mcp-router to ~/.codex/config.toml

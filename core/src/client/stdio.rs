@@ -140,7 +140,7 @@ impl StdioMcpClient {
         let peer = rx
             .await
             .map_err(|_| ClientError::Process("Service init channel closed".to_string()))?
-            .map_err(|e| ClientError::Process(e))?;
+            .map_err(ClientError::Process)?;
 
         *self.peer.write() = Some(Arc::new(peer));
         Ok(())

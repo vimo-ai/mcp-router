@@ -304,9 +304,7 @@ async fn handle_list_tools(
     }
 
     lines.push("\nNext step:".to_string());
-    lines.push(format!(
-        "  Use mcp_router__describe to view detailed parameters"
-    ));
+    lines.push("  Use mcp_router__describe to view detailed parameters".to_string());
     lines.push(format!(
         "  Example: mcp_router__describe {{\"tool\": \"{}__tool_name\"}}",
         server_name

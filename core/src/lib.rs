@@ -35,8 +35,10 @@ pub fn get_runtime() -> &'static Runtime {
 }
 
 /// Global router instance
+#[allow(dead_code)]
 static ROUTER: std::sync::OnceLock<Arc<RwLock<router::McpRouter>>> = std::sync::OnceLock::new();
 
+#[allow(dead_code)]
 fn get_router() -> &'static Arc<RwLock<router::McpRouter>> {
     ROUTER.get_or_init(|| Arc::new(RwLock::new(router::McpRouter::new())))
 }

@@ -78,7 +78,7 @@ impl CodexConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(path)?;
-        super::create_backup(&path.to_path_buf(), &content)?;
+        super::create_backup(path, &content)?;
 
         // Parse TOML
         let mut toml: Table = content
@@ -91,7 +91,7 @@ impl CodexConfigManager {
                 toml.insert("mcp_servers".to_string(), Value::Table(Table::new()));
             }
             Some(v) if !v.is_table() => {
-                super::remove_backup(&path.to_path_buf());
+                super::remove_backup(path);
                 return Err(PersistenceError::InvalidFormat(
                     "mcp_servers must be a table".to_string(),
                 ));
@@ -115,9 +115,9 @@ impl CodexConfigManager {
         // Write back
         let output = toml::to_string_pretty(&toml)
             .map_err(|e| PersistenceError::InvalidFormat(e.to_string()))?;
-        super::atomic_write(&path.to_path_buf(), &output)?;
+        super::atomic_write(path, &output)?;
 
-        super::remove_backup(&path.to_path_buf());
+        super::remove_backup(path);
 
         Ok(())
     }
@@ -129,7 +129,7 @@ impl CodexConfigManager {
 
         // Read and backup
         let content = fs::read_to_string(path)?;
-        super::create_backup(&path.to_path_buf(), &content)?;
+        super::create_backup(path, &content)?;
 
         // Parse TOML
         let mut toml: Table = content
@@ -144,9 +144,9 @@ impl CodexConfigManager {
         // Write back
         let output = toml::to_string_pretty(&toml)
             .map_err(|e| PersistenceError::InvalidFormat(e.to_string()))?;
-        super::atomic_write(&path.to_path_buf(), &output)?;
+        super::atomic_write(path, &output)?;
 
-        super::remove_backup(&path.to_path_buf());
+        super::remove_backup(path);
 
         Ok(())
     }
@@ -156,7 +156,7 @@ impl CodexConfigManager {
         path: &Path,
         port: u16,
     ) -> Result<(), PersistenceError> {
-        super::ensure_dir_exists(&dir.to_path_buf())?;
+        super::ensure_dir_exists(dir)?;
 
         let mut toml = Table::new();
         let mut mcp_servers = Table::new();
@@ -173,7 +173,7 @@ impl CodexConfigManager {
 
         let output = toml::to_string_pretty(&toml)
             .map_err(|e| PersistenceError::InvalidFormat(e.to_string()))?;
-        super::atomic_write(&path.to_path_buf(), &output)?;
+        super::atomic_write(path, &output)?;
 
         Ok(())
     }

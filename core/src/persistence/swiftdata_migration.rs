@@ -4,7 +4,6 @@
 //! when servers.json doesn't exist but the SwiftData database does.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 
 use rusqlite::{Connection, OpenFlags};

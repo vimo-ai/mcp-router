@@ -29,7 +29,7 @@ pub use swiftdata_migration::auto_migrate_if_needed;
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -50,7 +50,7 @@ pub fn ensure_config_dir() -> Result<PathBuf, PersistenceError> {
 // MARK: - Common utilities for config file operations
 
 /// Ensure a directory exists, creating it if necessary
-pub fn ensure_dir_exists(dir: &PathBuf) -> Result<(), PersistenceError> {
+pub fn ensure_dir_exists(dir: &Path) -> Result<(), PersistenceError> {
     if !dir.exists() {
         fs::create_dir_all(dir)?;
     }
@@ -58,20 +58,20 @@ pub fn ensure_dir_exists(dir: &PathBuf) -> Result<(), PersistenceError> {
 }
 
 /// Create a backup file (adds .backup before final extension)
-pub fn create_backup(config_path: &PathBuf, content: &str) -> Result<(), PersistenceError> {
+pub fn create_backup(config_path: &Path, content: &str) -> Result<(), PersistenceError> {
     let backup_path = backup_path_for(config_path);
     fs::write(&backup_path, content)?;
     Ok(())
 }
 
 /// Remove the backup file if it exists
-pub fn remove_backup(config_path: &PathBuf) {
+pub fn remove_backup(config_path: &Path) {
     let backup_path = backup_path_for(config_path);
     let _ = fs::remove_file(&backup_path);
 }
 
 /// Restore from backup file
-pub fn restore_backup(config_path: &PathBuf) -> Result<(), PersistenceError> {
+pub fn restore_backup(config_path: &Path) -> Result<(), PersistenceError> {
     let backup_path = backup_path_for(config_path);
 
     if !backup_path.exists() {
@@ -85,7 +85,7 @@ pub fn restore_backup(config_path: &PathBuf) -> Result<(), PersistenceError> {
 }
 
 /// Atomic write: write to temp file then rename
-pub fn atomic_write(path: &PathBuf, content: &str) -> Result<(), PersistenceError> {
+pub fn atomic_write(path: &Path, content: &str) -> Result<(), PersistenceError> {
     let temp_path = temp_path_for(path);
     fs::write(&temp_path, content)?;
     fs::rename(&temp_path, path)?;
@@ -93,8 +93,8 @@ pub fn atomic_write(path: &PathBuf, content: &str) -> Result<(), PersistenceErro
 }
 
 /// Get backup path for a config file (e.g., foo.json -> foo.json.backup)
-fn backup_path_for(path: &PathBuf) -> PathBuf {
-    let mut backup = path.clone();
+fn backup_path_for(path: &Path) -> PathBuf {
+    let mut backup = path.to_path_buf();
     let ext = path.extension()
         .map(|e| format!("{}.backup", e.to_string_lossy()))
         .unwrap_or_else(|| "backup".to_string());
@@ -103,8 +103,8 @@ fn backup_path_for(path: &PathBuf) -> PathBuf {
 }
 
 /// Get temp path for atomic write (e.g., foo.json -> foo.json.tmp)
-fn temp_path_for(path: &PathBuf) -> PathBuf {
-    let mut temp = path.clone();
+fn temp_path_for(path: &Path) -> PathBuf {
+    let mut temp = path.to_path_buf();
     let ext = path.extension()
         .map(|e| format!("{}.tmp", e.to_string_lossy()))
         .unwrap_or_else(|| "tmp".to_string());

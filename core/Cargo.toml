@@ -52,8 +52,7 @@ dirs = "5"
 
 # FFI
 libc = "0.2"
-# TODO: 发布后改回 git 依赖
-vimo-ffi = { path = "../../../vimo-rust/vimo-ffi" }
+vimo-ffi = { git = "https://github.com/vimo-ai/vimo-rust" }
 
 [build-dependencies]
 cbindgen = "0.27"
@@ -81,3 +80,9 @@ incremental = true
 strip = "symbols"
 debug = "line-tables-only"
 panic = "abort"
+
+# ============================================================================
+# [patch] - 在 ETerm workspace 中使用本地 vimo-rust submodule
+# ============================================================================
+[patch."https://github.com/vimo-ai/vimo-rust"]
+vimo-ffi = { path = "../../vimo-rust/vimo-ffi" }

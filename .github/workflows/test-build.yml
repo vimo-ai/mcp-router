@@ -16,6 +16,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Checkout vimo-rust
+        uses: actions/checkout@v4
+        with:
+          repository: vimo-ai/vimo-rust
+          path: deps/vimo-rust
+
+      - name: Create symlinks for dependencies
+        run: |
+          ln -s $GITHUB_WORKSPACE/deps/vimo-rust $GITHUB_WORKSPACE/../vimo-rust
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:

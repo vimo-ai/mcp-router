@@ -132,10 +132,9 @@ actor StdioMCPClient {
                     }
 
                     // 解析 JSON-RPC 响应
-                    if let data = trimmedMessage.data(using: .utf8) {
-                        try? JSONDecoder().decode(JSONRPCResponse.self, from: data).map { response in
-                            Task { await requestMatcher.handleResponse(response) }
-                        }
+                    if let data = trimmedMessage.data(using: .utf8),
+                       let response = try? JSONDecoder().decode(JSONRPCResponse.self, from: data) {
+                        Task { await self.requestMatcher.handleResponse(response) }
                     }
                 } catch {
                     if !Task.isCancelled {

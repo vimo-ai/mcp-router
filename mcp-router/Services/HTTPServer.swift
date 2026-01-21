@@ -560,11 +560,11 @@ extension NWConnection {
     /// 创建一个异步数据流，持续接收数据直到连接关闭
     ///
     /// - Returns: 异步数据流
-    func dataStream() -> AsyncStream<Data> {
+    nonisolated func dataStream() -> AsyncStream<Data> {
         AsyncStream { continuation in
             // 递归调度接收函数
             // 注意：这里的递归是在闭包内部，不会造成调用栈累积
-            func scheduleReceive() {
+            @Sendable func scheduleReceive() {
                 self.receive(minimumIncompleteLength: 1, maximumLength: 65536) {
                     data, _, isComplete, error in
 

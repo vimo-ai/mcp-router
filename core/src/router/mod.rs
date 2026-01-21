@@ -445,7 +445,6 @@ impl Default for McpRouter {
 mod tests {
     use super::*;
     use crate::config::{ServerConfig, Workspace};
-    use std::collections::HashMap;
 
     fn create_test_http_config(name: &str) -> ServerConfig {
         ServerConfig::new_http(name, &format!("http://localhost:8080/{}", name))
@@ -487,7 +486,7 @@ mod tests {
     fn test_load_workspaces() {
         let mut router = McpRouter::new();
 
-        let mut ws1 = Workspace::new("token1", "Workspace 1");
+        let ws1 = Workspace::new("token1", "Workspace 1");
         let ws2 = Workspace::default_workspace();
 
         router.load_workspaces(vec![ws1.clone(), ws2]);

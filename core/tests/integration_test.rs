@@ -9,6 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 
+fn test_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("Failed to build reqwest client")
+}
+
 /// Helper to create test router with some servers
 fn create_test_router() -> Arc<RwLock<McpRouter>> {
     let mut router = McpRouter::new();
@@ -58,7 +65,7 @@ async fn test_health_endpoint() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Test health endpoint
-    let client = reqwest::Client::new();
+    let client = test_client();
     let response = client
         .get("http://127.0.0.1:19201/health")
         .send()
@@ -87,7 +94,7 @@ async fn test_initialize_request() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Send initialize request
-    let client = reqwest::Client::new();
+    let client = test_client();
     let request = JsonRpcRequest::new(Some(1), "initialize", None);
 
     let response = client
@@ -126,7 +133,7 @@ async fn test_tools_list_request() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let client = reqwest::Client::new();
+    let client = test_client();
 
     // First initialize
     let init_request = JsonRpcRequest::new(Some(1), "initialize", None);
@@ -190,7 +197,7 @@ async fn test_notification_returns_202() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let client = reqwest::Client::new();
+    let client = test_client();
 
     // Send notification (no id)
     let notification = JsonRpcRequest::new(None, "notifications/initialized", None);
@@ -220,7 +227,7 @@ async fn test_tools_call_list_servers() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let client = reqwest::Client::new();
+    let client = test_client();
 
     // Call mcp_router__list_servers
     let call_request = JsonRpcRequest::new(
@@ -268,7 +275,7 @@ async fn test_unknown_method_returns_error() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let client = reqwest::Client::new();
+    let client = test_client();
 
     let request = JsonRpcRequest::new(Some(1), "unknown/method", None);
 

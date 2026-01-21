@@ -9,42 +9,70 @@ import Foundation
 
 // MARK: - JSON-RPC
 
-struct JSONRPCRequest: Codable {
+struct JSONRPCRequest: Codable, @unchecked Sendable {
     let jsonrpc: String
     let id: Int?
     let method: String
     let params: [String: AnyCodable]?
 
-    init(id: Int? = nil, method: String, params: [String: AnyCodable]? = nil) {
+    nonisolated init(id: Int? = nil, method: String, params: [String: AnyCodable]? = nil) {
         self.jsonrpc = "2.0"
         self.id = id
         self.method = method
         self.params = params
     }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        jsonrpc = try container.decode(String.self, forKey: .jsonrpc)
+        id = try container.decodeIfPresent(Int.self, forKey: .id)
+        method = try container.decode(String.self, forKey: .method)
+        params = try container.decodeIfPresent([String: AnyCodable].self, forKey: .params)
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jsonrpc, forKey: .jsonrpc)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(method, forKey: .method)
+        try container.encodeIfPresent(params, forKey: .params)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case jsonrpc, id, method, params
+    }
 }
 
-struct JSONRPCResponse: Codable {
+struct JSONRPCResponse: Codable, @unchecked Sendable {
     let jsonrpc: String
     let id: Int?
     let result: AnyCodable?
     let error: JSONRPCError?
 
-    init(id: Int?, result: AnyCodable) {
+    nonisolated init(id: Int?, result: AnyCodable) {
         self.jsonrpc = "2.0"
         self.id = id
         self.result = result
         self.error = nil
     }
 
-    init(id: Int?, error: JSONRPCError) {
+    nonisolated init(id: Int?, error: JSONRPCError) {
         self.jsonrpc = "2.0"
         self.id = id
         self.result = nil
         self.error = error
     }
 
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        jsonrpc = try container.decode(String.self, forKey: .jsonrpc)
+        id = try container.decodeIfPresent(Int.self, forKey: .id)
+        result = try container.decodeIfPresent(AnyCodable.self, forKey: .result)
+        error = try container.decodeIfPresent(JSONRPCError.self, forKey: .error)
+    }
+
     // 自定义编码,确保 result 和 error 互斥
-    func encode(to encoder: Encoder) throws {
+    nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(jsonrpc, forKey: .jsonrpc)
         try container.encode(id, forKey: .id)
@@ -61,34 +89,76 @@ struct JSONRPCResponse: Codable {
     }
 }
 
-struct JSONRPCError: Codable {
+struct JSONRPCError: Codable, Sendable {
     let code: Int
     let message: String
 }
 
 // MARK: - MCP Protocol
 
-struct MCPTool: Codable {
+struct MCPTool: Codable, @unchecked Sendable {
     let name: String
     let description: String
     let inputSchema: [String: AnyCodable]?
+
+    nonisolated init(name: String, description: String, inputSchema: [String: AnyCodable]? = nil) {
+        self.name = name
+        self.description = description
+        self.inputSchema = inputSchema
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decode(String.self, forKey: .description)
+        inputSchema = try container.decodeIfPresent([String: AnyCodable].self, forKey: .inputSchema)
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encodeIfPresent(inputSchema, forKey: .inputSchema)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, description, inputSchema
+    }
 }
 
-struct MCPToolsListResult: Codable {
+struct MCPToolsListResult: Codable, @unchecked Sendable {
     let tools: [MCPTool]
+
+    nonisolated init(tools: [MCPTool]) {
+        self.tools = tools
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tools = try container.decode([MCPTool].self, forKey: .tools)
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tools, forKey: .tools)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case tools
+    }
 }
 
-struct MCPInitializeResult: Codable {
+struct MCPInitializeResult: Codable, @unchecked Sendable {
     let protocolVersion: String
     let serverInfo: ServerInfo
     let capabilities: Capabilities
 
-    struct ServerInfo: Codable {
+    struct ServerInfo: Codable, Sendable {
         let name: String
         let version: String
     }
 
-    struct Capabilities: Codable {
+    struct Capabilities: Codable, @unchecked Sendable {
         let tools: [String: AnyCodable]?
 
         init() {
@@ -97,21 +167,21 @@ struct MCPInitializeResult: Codable {
     }
 }
 
-struct MCPToolCallParams: Codable {
+struct MCPToolCallParams: Codable, @unchecked Sendable {
     let name: String
     let arguments: [String: AnyCodable]
 }
 
 // MARK: - AnyCodable (支持动态 JSON)
 
-struct AnyCodable: Codable {
+struct AnyCodable: Codable, @unchecked Sendable {
     let value: Any
 
-    init(_ value: Any) {
+    nonisolated init(_ value: Any) {
         self.value = value
     }
 
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
         if let int = try? container.decode(Int.self) {
@@ -131,7 +201,7 @@ struct AnyCodable: Codable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
 
         switch value {

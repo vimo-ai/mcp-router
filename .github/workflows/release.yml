@@ -33,13 +33,13 @@ jobs:
       - name: Get latest build number and increment
         id: build_number
         run: |
-          # 从 appcast.xml 获取最新的 build number
+          # Get latest build number from appcast.xml
           APPCAST_URL="https://vimo-ai.github.io/mcp-router/appcast.xml"
           LATEST_BUILD=$(curl -s "$APPCAST_URL" | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | head -1 | sed 's/<[^>]*>//g' || echo "0")
 
-          # 验证是否为纯数字
+          # Validate that it's a number
           if ! [[ "$LATEST_BUILD" =~ ^[0-9]+$ ]]; then
-            echo "⚠️  无法从 appcast.xml 获取有效的 build number，使用 0"
+            echo "⚠️  Failed to get valid build number from appcast.xml, using 0"
             LATEST_BUILD=0
           fi
 
@@ -66,10 +66,10 @@ jobs:
             core/target/x86_64-apple-darwin/release/libmcp_router_core.dylib \
             -output build/lib/libmcp_router_core.dylib
 
-          # 复制头文件
+          # Copy header file
           cp core/include/mcp_router_core.h build/lib/
 
-          # 创建 module.modulemap (MCPRouterCore 驼峰命名与 Swift import 一致)
+          # Create module.modulemap (MCPRouterCore matches Swift import naming)
           cat > build/lib/module.modulemap <<'EOF'
           module MCPRouterCore {
               header "mcp_router_core.h"
@@ -93,7 +93,7 @@ jobs:
       - name: Package Dylib
         run: |
           cd build/lib
-          # 重命名为 mcp_router_core (MCPRouterKit 期望的格式)
+          # Rename to mcp_router_core (expected format for MCPRouterKit)
           cp libmcp_router_core.dylib mcp_router_core
           zip -r ../mcp_router_core-${{ steps.version.outputs.VERSION }}-macos-universal.zip \
             mcp_router_core mcp_router_core.h module.modulemap
@@ -110,19 +110,19 @@ jobs:
                      CODE_SIGN_IDENTITY="-" \
                      archive
 
-          # 复制 App 并进行 adhoc 签名
+          # Copy app and perform adhoc signing
           cp -R build/mcp-router.xcarchive/Products/Applications/mcp-router.app build/
 
-          # 验证版本号
+          # Verify version number
           echo "Verifying build version..."
           plutil -p build/mcp-router.app/Contents/Info.plist | grep -E "CFBundleVersion|CFBundleShortVersionString"
 
-          # 确保 adhoc 签名
-          echo "🔏 正在进行 adhoc 签名..."
+          # Perform adhoc signing
+          echo "🔏 Performing adhoc signing..."
           codesign --sign - --force --deep --timestamp build/mcp-router.app
 
-          # 验证签名
-          echo "✅ 验证签名结果:"
+          # Verify signature
+          echo "✅ Signature verification:"
           codesign --verify --deep --strict --verbose=2 build/mcp-router.app
 
       - name: Create App ZIP
@@ -139,9 +139,9 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.DEPLOY }}
         run: |
-          # 使用 Sparkle 的签名工具
+          # Use Sparkle's signing tool
           FULL_OUTPUT=$(echo "$SPARKLE_PRIVATE_KEY" | ./bin/sign_update -f - build/mcp-router-${{ steps.version.outputs.VERSION }}.zip)
-          # 提取签名值（去掉 sparkle:edSignature= 前缀和引号）
+          # Extract signature value (remove sparkle:edSignature= prefix and quotes)
           SIGNATURE=$(echo "$FULL_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
           echo "SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
           echo "Signature: $SIGNATURE"
@@ -155,19 +155,19 @@ jobs:
 
       - name: Update appcast.xml
         run: |
-          # 自动检测是否为 beta 版本
+          # Auto-detect if this is a beta version
           VERSION="${{ steps.version.outputs.VERSION }}"
           BUILD_NUMBER="${{ steps.build_number.outputs.BUILD_NUMBER }}"
           CHANNEL=""
 
           if [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"rc"* ]]; then
             CHANNEL='<sparkle:channel>beta</sparkle:channel>'
-            echo "🚧 检测到预发布版本，添加 beta channel"
+            echo "🚧 Pre-release version detected, adding beta channel"
           else
-            echo "✅ 稳定版本，使用 default channel"
+            echo "✅ Stable version, using default channel"
           fi
 
-          # 创建新的 item
+          # Create new item
           cat > new_item.xml <<EOF
           <item>
               <title>Version $VERSION</title>
@@ -190,7 +190,7 @@ jobs:
           </item>
           EOF
 
-          # 如果 appcast.xml 不存在，创建它
+          # Create appcast.xml if it doesn't exist
           if [ ! -f appcast.xml ]; then
             cat > appcast.xml <<'APPCAST'
           <?xml version="1.0" encoding="utf-8"?>
@@ -205,13 +205,13 @@ jobs:
           APPCAST
           fi
 
-          # 插入新 item 到 channel 中（在 </channel> 之前）
+          # Insert new item into channel (before </channel>)
           python3 << 'PYTHON_SCRIPT'
           with open('appcast.xml', 'r') as f:
               content = f.read()
           with open('new_item.xml', 'r') as f:
               new_item = f.read()
-          # 在 </channel> 之前插入新 item
+          # Insert new item before </channel>
           content = content.replace('    </channel>', new_item + '\n    </channel>')
           with open('appcast.xml', 'w') as f:
               f.write(content)

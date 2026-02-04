@@ -320,6 +320,19 @@ pub extern "C" fn mcp_router_set_expose_management_tools(
         let mut router = handle.router.write();
         router.set_expose_management_tools(expose);
 
+        // Persist to settings.json
+        if let Ok(manager) = RouterConfigManager::new() {
+            if let Ok(mut settings) = manager.load_settings() {
+                settings.expose_management_tools = expose;
+                manager.save_settings(&settings)
+                    .map_err(|e| {
+                        tracing::warn!("Failed to persist expose_management_tools={}: {}", expose, e);
+                        FfiError::custom(format!("Failed to persist: {}", e))
+                    })?;
+                tracing::info!("Persisted expose_management_tools={} to settings.json", expose);
+            }
+        }
+
         Ok::<_, FfiError>(true)
     })
 }

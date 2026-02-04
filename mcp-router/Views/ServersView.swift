@@ -200,17 +200,28 @@ extension String: @retroactive Identifiable {
 
 struct ServerCardView: View {
     @EnvironmentObject var appDelegate: AppDelegate
+    @ObservedObject var router: MCPRouter = .shared
     @Binding var server: ServerItem
     let onEdit: () -> Void
     let onDelete: () -> Void
 
+    private var connectionState: ServerConnectionState {
+        guard server.type == "stdio" else { return .idle }
+        return router.connectionState(for: server.name)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header: 名称 + Toggle
+            // Header: 名称 + 状态 + Toggle
             HStack {
                 Text(server.name)
                     .font(DesignSystem.Typography.headline)
                     .foregroundColor(DesignSystem.Colors.primaryText)
+
+                // stdio server 连接状态指示
+                if server.type == "stdio" {
+                    connectionStateView
+                }
 
                 Spacer()
 
@@ -231,6 +242,14 @@ struct ServerCardView: View {
                     .foregroundColor(DesignSystem.Colors.secondaryText)
             }
 
+            // 错误信息
+            if case .error(let message) = connectionState {
+                Text(message)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+            }
+
             // URL 或 Command
             if let url = server.url {
                 Label(url, systemImage: "link")
@@ -248,6 +267,18 @@ struct ServerCardView: View {
 
             // 操作按钮
             HStack {
+                // 错误状态时显示重试按钮
+                if connectionState.isError {
+                    Button {
+                        Task { await router.retryServer(server.name) }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(DesignSystem.Typography.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundColor(.orange)
+                }
+
                 Spacer()
 
                 Button {
@@ -270,6 +301,31 @@ struct ServerCardView: View {
         .background(DesignSystem.Colors.cardBackground)
         .cornerRadius(DesignSystem.CornerRadius.lg)
         .opacity(server.isEnabled ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private var connectionStateView: some View {
+        switch connectionState {
+        case .idle:
+            Circle()
+                .fill(.gray.opacity(0.5))
+                .frame(width: 8, height: 8)
+                .help("Not connected")
+        case .connecting:
+            ProgressView()
+                .controlSize(.mini)
+                .help("Connecting...")
+        case .ready:
+            Circle()
+                .fill(.green)
+                .frame(width: 8, height: 8)
+                .help("Connected")
+        case .error:
+            Circle()
+                .fill(.red)
+                .frame(width: 8, height: 8)
+                .help("Connection failed")
+        }
     }
 }
 

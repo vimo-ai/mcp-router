@@ -9,11 +9,29 @@ import Foundation
 import Combine
 import SwiftData
 
+// MARK: - Server Connection State
+
+/// stdio server 的运行时连接状态
+enum ServerConnectionState: Equatable {
+    case idle
+    case connecting
+    case ready
+    case error(String)
+
+    var isError: Bool {
+        if case .error = self { return true }
+        return false
+    }
+}
+
 final class MCPRouter: ObservableObject {
     static let shared = MCPRouter()
 
     @Published private(set) var servers: [String: MCPClient] = [:]
     @Published private(set) var serverConfigs: [ServerConfig] = []
+
+    /// server 连接状态（server name -> state），仅用于 stdio 类型
+    @Published private(set) var serverStates: [String: ServerConnectionState] = [:]
 
     // Workspace token -> safe tool name -> (serverName, toolName)
     private var flattenedToolMaps: [String: [String: (server: String, tool: String)]] = [:]
@@ -104,67 +122,92 @@ final class MCPRouter: ObservableObject {
         }
     }
 
-    /// 获取指定 Workspace 下所有需要平铺的 tools
+    /// 获取指定 Workspace 下所有需要平铺的 tools（并发获取，单个 server 失败不阻塞其他）
     /// - Parameter workspace: 目标 Workspace，nil 使用默认 Workspace
     /// - Returns: 平铺的 MCPTool 数组，tool name 使用安全格式 {server_name}__{tool_name}
     func getFlattenedTools(for workspace: Workspace?) async -> [MCPTool] {
         let effectiveServers = getEffectiveServers(for: workspace)
-        var flattenedTools: [MCPTool] = []
-        var mapping: [String: (server: String, tool: String)] = [:]
-        var usedNames = Set<String>()
 
-        for server in effectiveServers {
-            // 检查该 server 是否启用了平铺模式
-            let isFlattenEnabled = workspace?.isFlattenEnabled(
+        // 过滤出启用了平铺模式的 server
+        let flattenServers = effectiveServers.filter { server in
+            workspace?.isFlattenEnabled(
                 server.name,
                 serverConfig: server,
                 defaultWorkspace: defaultWorkspace
             ) ?? server.flattenMode
+        }
 
-            guard isFlattenEnabled else {
-                continue
+        // 标记 stdio server 为 connecting
+        for server in flattenServers where server.type == .stdio {
+            updateServerState(server.name, state: .connecting)
+        }
+
+        // 并发获取每个 server 的 tools
+        let serverResults: [(serverName: String, tools: [MCPTool])] = await withTaskGroup(
+            of: (String, [MCPTool])?.self
+        ) { group in
+            for server in flattenServers {
+                let httpClient = servers[server.name]
+                let pool = stdioProcessPool
+                let wsToken = workspace?.token ?? "default"
+
+                group.addTask { [weak self] in
+                    do {
+                        let tools: [MCPTool]
+                        if server.type == .http {
+                            guard let client = httpClient else {
+                                print("⚠️ 跳过平铺: Server '\(server.name)' 未找到")
+                                return nil
+                            }
+                            tools = try await client.listTools()
+                        } else {
+                            let stdioClient = try await pool.getOrCreateClient(
+                                workspaceToken: wsToken,
+                                config: server
+                            )
+                            tools = try await stdioClient.listTools()
+                            self?.updateServerState(server.name, state: .ready)
+                        }
+                        print("✅ 平铺 Server '\(server.name)' 的 \(tools.count) 个工具")
+                        return (server.name, tools)
+                    } catch {
+                        print("⚠️ 获取 Server '\(server.name)' 的工具失败: \(error.localizedDescription)")
+                        if server.type == .stdio {
+                            self?.updateServerState(server.name, state: .error(error.localizedDescription))
+                        }
+                        return nil
+                    }
+                }
             }
 
-            // 获取该 server 的 tools
-            do {
-                let tools: [MCPTool]
-                if server.type == .http {
-                    // HTTP 类型
-                    guard let client = servers[server.name] else {
-                        print("⚠️ 跳过平铺: Server '\(server.name)' 未找到")
-                        continue
-                    }
-                    tools = try await client.listTools()
-                } else {
-                    // stdio 类型
-                    let workspaceToken = workspace?.token ?? "default"
-                    let stdioClient = try await stdioProcessPool.getOrCreateClient(
-                        workspaceToken: workspaceToken,
-                        config: server
-                    )
-                    tools = try await stdioClient.listTools()
+            var results: [(String, [MCPTool])] = []
+            for await result in group {
+                if let result {
+                    results.append(result)
                 }
+            }
+            return results
+        }
 
-                // 生成安全的工具名，格式 {server_name}__{tool_name}
-                let prefixedTools = tools.map { tool -> MCPTool in
-                    let safeName = makeSafeToolName(
-                        serverName: server.name,
-                        toolName: tool.name,
-                        existing: usedNames
-                    )
-                    usedNames.insert(safeName)
-                    mapping[safeName] = (server: server.name, tool: tool.name)
-                    return MCPTool(
-                        name: safeName,
-                        description: tool.description,
-                        inputSchema: tool.inputSchema
-                    )
-                }
+        // 串行构建安全名映射（name 去重依赖已用集合）
+        var flattenedTools: [MCPTool] = []
+        var mapping: [String: (server: String, tool: String)] = [:]
+        var usedNames = Set<String>()
 
-                flattenedTools.append(contentsOf: prefixedTools)
-                print("✅ 平铺 Server '\(server.name)' 的 \(prefixedTools.count) 个工具 (安全名)")
-            } catch {
-                print("⚠️ 获取 Server '\(server.name)' 的工具失败: \(error.localizedDescription)")
+        for (serverName, tools) in serverResults {
+            for tool in tools {
+                let safeName = makeSafeToolName(
+                    serverName: serverName,
+                    toolName: tool.name,
+                    existing: usedNames
+                )
+                usedNames.insert(safeName)
+                mapping[safeName] = (server: serverName, tool: tool.name)
+                flattenedTools.append(MCPTool(
+                    name: safeName,
+                    description: tool.description,
+                    inputSchema: tool.inputSchema
+                ))
             }
         }
 
@@ -229,6 +272,47 @@ final class MCPRouter: ObservableObject {
         }
 
         print("✅ 已加载 \(servers.count) 个 HTTP Servers")
+    }
+
+    // MARK: - Server State Management
+
+    /// 更新 server 连接状态
+    private func updateServerState(_ name: String, state: ServerConnectionState) {
+        DispatchQueue.main.async { [weak self] in
+            self?.serverStates[name] = state
+        }
+    }
+
+    /// 获取 server 连接状态
+    func connectionState(for name: String) -> ServerConnectionState {
+        serverStates[name] ?? .idle
+    }
+
+    /// 重试连接失败的 server
+    func retryServer(_ name: String, workspace: Workspace? = nil) async {
+        guard let config = serverConfigs.first(where: { $0.name == name }),
+              config.type == .stdio else {
+            return
+        }
+
+        let wsToken = workspace?.token ?? "default"
+        updateServerState(name, state: .connecting)
+
+        // 先释放旧的 client
+        await stdioProcessPool.releaseClient(workspaceToken: wsToken, serverName: name)
+
+        do {
+            let client = try await stdioProcessPool.getOrCreateClient(
+                workspaceToken: wsToken,
+                config: config
+            )
+            _ = try await client.listTools()
+            updateServerState(name, state: .ready)
+            print("✅ 重连 Server '\(name)' 成功")
+        } catch {
+            updateServerState(name, state: .error(error.localizedDescription))
+            print("❌ 重连 Server '\(name)' 失败: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Router Tools (元工具)

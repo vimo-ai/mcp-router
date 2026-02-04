@@ -98,7 +98,7 @@ impl StdioMcpClient {
         let (tx, rx) = oneshot::channel();
 
         // Spawn the rmcp service on the global runtime so it stays alive
-        get_runtime().spawn(async move {
+        let service_handle = get_runtime().spawn(async move {
             // Create command for rmcp
             let mut cmd = Command::new(&executable);
             cmd.args(&args).envs(&env);
@@ -136,11 +136,27 @@ impl StdioMcpClient {
             tracing::info!("{} MCP client service stopped", name);
         });
 
-        // Wait for the service to initialize
-        let peer = rx
-            .await
-            .map_err(|_| ClientError::Process("Service init channel closed".to_string()))?
-            .map_err(ClientError::Process)?;
+        // Wait for the service to initialize (with timeout)
+        let init_timeout = std::time::Duration::from_secs(10);
+        let peer = match tokio::time::timeout(init_timeout, rx).await {
+            Ok(Ok(Ok(peer))) => peer,
+            Ok(Ok(Err(e))) => return Err(ClientError::Process(e)),
+            Ok(Err(_)) => {
+                return Err(ClientError::Process(
+                    "Service init channel closed".to_string(),
+                ))
+            }
+            Err(_) => {
+                // Abort the service task to clean up the child process
+                service_handle.abort();
+                tracing::warn!(
+                    "{} MCP initialize handshake timed out after {}s, process killed",
+                    self.config.name,
+                    init_timeout.as_secs()
+                );
+                return Err(ClientError::Timeout);
+            }
+        };
 
         *self.peer.write() = Some(Arc::new(peer));
         Ok(())

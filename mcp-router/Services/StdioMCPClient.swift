@@ -22,21 +22,51 @@ actor StdioMCPClient {
 
     // MARK: - Lifecycle
 
-    /// 启动客户端
+    /// 启动超时时间（秒）
+    private static let startTimeoutSeconds: UInt64 = 10
+
+    /// 启动客户端（带超时保护）
     func start() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await self.doStart()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: Self.startTimeoutSeconds * 1_000_000_000)
+                throw MCPError.timeout
+            }
+            // 第一个完成的 task 决定结果，取消另一个
+            do {
+                try await group.next()
+                group.cancelAll()
+            } catch {
+                group.cancelAll()
+                // 如果是超时，停止已启动的进程
+                if case MCPError.timeout = error {
+                    print("⏰ 启动超时 (\(Self.startTimeoutSeconds)s): \(config.name)")
+                    await processManager.stop()
+                }
+                throw error
+            }
+        }
+    }
+
+    /// 实际启动逻辑
+    private func doStart() async throws {
         // 启动进程
         try await processManager.start()
 
-        // 等待进程准备好
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try Task.checkCancellation()
 
-        // 先启动读取任务（但它会立即开始等待数据）
+        // 启动 stdout 读取任务
         startOutputReader()
 
         // 给读取任务一点时间启动
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        // 执行 MCP initialize 握手
+        try Task.checkCancellation()
+
+        // 执行 MCP initialize 握手（sendRequest 内部有 30s 超时，但外层 start 整体 10s 限制更严）
         try await performInitialize()
     }
 

@@ -4,7 +4,7 @@
 
 pub mod meta_tools;
 
-use crate::client::{HttpMcpClient, StdioMcpClient};
+use crate::client::{ClientError, HttpMcpClient, StdioMcpClient};
 use crate::config::{ServerConfig, ServerType, Workspace};
 use crate::protocol::{JsonRpcError, McpTool, ToolCallResult};
 use dashmap::DashMap;
@@ -90,6 +90,9 @@ impl McpRouter {
         }
 
         self.server_configs.push(config);
+
+        // Invalidate flattened tool maps cache
+        self.flattened_tool_maps.clear();
     }
 
     /// Remove a server by name
@@ -97,7 +100,34 @@ impl McpRouter {
         let before_len = self.server_configs.len();
         self.server_configs.retain(|c| c.name != name);
         self.http_clients.remove(name);
-        self.stdio_clients.remove(name);
+
+        // stdio_clients key format is "token::server_name", match by server name part
+        let keys_to_remove: Vec<String> = self
+            .stdio_clients
+            .iter()
+            .filter(|entry| {
+                entry
+                    .key()
+                    .split_once("::")
+                    .map(|(_, n)| n == name)
+                    .unwrap_or(false)
+            })
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        for key in &keys_to_remove {
+            if let Some((_, client)) = self.stdio_clients.remove(key) {
+                let key = key.clone();
+                crate::get_runtime().spawn(async move {
+                    tracing::debug!("Stopping stdio client: {}", key);
+                    client.stop().await;
+                });
+            }
+        }
+
+        // Invalidate flattened tool maps cache
+        self.flattened_tool_maps.clear();
+
         before_len != self.server_configs.len()
     }
 
@@ -114,6 +144,9 @@ impl McpRouter {
             } else if !enabled {
                 self.http_clients.remove(name);
             }
+
+            // Invalidate flattened tool maps cache
+            self.flattened_tool_maps.clear();
         }
     }
 
@@ -121,6 +154,9 @@ impl McpRouter {
     pub fn set_server_flatten_mode(&mut self, name: &str, flatten: bool) {
         if let Some(config) = self.server_configs.iter_mut().find(|c| c.name == name) {
             config.flatten_mode = flatten;
+
+            // Invalidate flattened tool maps cache
+            self.flattened_tool_maps.clear();
         }
     }
 
@@ -247,6 +283,32 @@ impl McpRouter {
         ))
     }
 
+    // MARK: - Stdio Client Lifecycle
+
+    /// Get or create+start a stdio client for the given server config and workspace.
+    ///
+    /// Concurrency safety:
+    /// - DashMap entry API ensures only one client instance per key (synchronous)
+    /// - StdioMcpClient internal Mutex ensures start() runs only once (async)
+    async fn get_or_start_stdio_client(
+        &self,
+        config: &ServerConfig,
+        workspace: Option<&Workspace>,
+    ) -> Result<Arc<StdioMcpClient>, ClientError> {
+        let token = workspace.map(|w| w.token.as_str()).unwrap_or("default");
+        let key = format!("{}::{}", token, config.name);
+
+        let client = self
+            .stdio_clients
+            .entry(key)
+            .or_insert_with(|| Arc::new(StdioMcpClient::new(config.clone())))
+            .value()
+            .clone();
+
+        client.ensure_started().await?;
+        Ok(client)
+    }
+
     // MARK: - Tool Listing
 
     /// Get flattened tools for a workspace
@@ -329,26 +391,11 @@ impl McpRouter {
                 }
             }
             ServerType::Stdio => {
-                let token = workspace
-                    .map(|w| w.token.as_str())
-                    .unwrap_or("default");
-                let key = format!("{}::{}", token, config.name);
-
-                if let Some(client) = self.stdio_clients.get(&key) {
-                    client
-                        .list_tools()
-                        .await
-                        .map_err(|e| format!("{}", e))
-                } else {
-                    // Create new stdio client
-                    let client = StdioMcpClient::new(config.clone());
-                    if let Err(e) = client.start().await {
-                        return Err(format!("Failed to start stdio client: {}", e));
-                    }
-                    let client = Arc::new(client);
-                    self.stdio_clients.insert(key, client.clone());
-                    client.list_tools().await.map_err(|e| format!("{}", e))
-                }
+                let client = self
+                    .get_or_start_stdio_client(config, workspace)
+                    .await
+                    .map_err(|e| format!("Failed to start stdio client: {}", e))?;
+                client.list_tools().await.map_err(|e| format!("{}", e))
             }
         }
     }
@@ -384,22 +431,14 @@ impl McpRouter {
                 }
             }
             ServerType::Stdio => {
-                let token = workspace
-                    .map(|w| w.token.as_str())
-                    .unwrap_or("default");
-                let key = format!("{}::{}", token, server_name);
-
-                if let Some(client) = self.stdio_clients.get(&key) {
-                    client
-                        .call_tool(tool_name, arguments)
-                        .await
-                        .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
-                } else {
-                    Err(JsonRpcError::new(
-                        -32602,
-                        format!("Stdio client not found: {}", server_name),
-                    ))
-                }
+                let client = self
+                    .get_or_start_stdio_client(config, workspace)
+                    .await
+                    .map_err(|e| JsonRpcError::internal_error(&e.to_string()))?;
+                client
+                    .call_tool(tool_name, arguments)
+                    .await
+                    .map_err(|e| JsonRpcError::internal_error(&e.to_string()))
             }
         }
     }

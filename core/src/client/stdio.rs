@@ -22,6 +22,8 @@ pub struct StdioMcpClient {
     peer: RwLock<Option<Arc<Peer<RoleClient>>>>,
     /// Cached tools list
     tools_cache: RwLock<Option<Vec<McpTool>>>,
+    /// Lock to prevent concurrent start() calls
+    start_lock: tokio::sync::Mutex<()>,
 }
 
 impl StdioMcpClient {
@@ -30,11 +32,32 @@ impl StdioMcpClient {
             config,
             peer: RwLock::new(None),
             tools_cache: RwLock::new(None),
+            start_lock: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// Start the subprocess and establish MCP connection
-    pub async fn start(&self) -> Result<(), ClientError> {
+    /// Ensure the client is started (thread-safe, idempotent).
+    ///
+    /// Uses double-check locking:
+    /// 1. Fast path: already running, return immediately (no lock)
+    /// 2. Slow path: acquire lock, check again, start if needed
+    pub async fn ensure_started(&self) -> Result<(), ClientError> {
+        if self.is_running() {
+            return Ok(());
+        }
+
+        let _guard = self.start_lock.lock().await;
+
+        if self.is_running() {
+            return Ok(());
+        }
+
+        self.start().await
+    }
+
+    /// Start the subprocess and establish MCP connection.
+    /// Prefer `ensure_started()` which provides concurrency safety.
+    pub(crate) async fn start(&self) -> Result<(), ClientError> {
         // Check if already running
         if self.peer.read().is_some() {
             return Ok(());

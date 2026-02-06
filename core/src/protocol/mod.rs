@@ -184,7 +184,11 @@ pub enum ContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "image")]
-    Image { data: String, mime_type: String },
+    Image {
+        data: String,
+        #[serde(alias = "mime_type", rename = "mimeType")]
+        mime_type: String,
+    },
 }
 
 impl ToolCallResult {
@@ -421,7 +425,7 @@ mod tests {
         };
         let json_str = serde_json::to_string(&image_block).unwrap();
         assert!(json_str.contains("\"type\":\"image\""));
-        assert!(json_str.contains("\"mime_type\""));
+        assert!(json_str.contains("\"mimeType\""));
     }
 
     #[test]

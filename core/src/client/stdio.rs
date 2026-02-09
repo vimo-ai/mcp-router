@@ -216,7 +216,7 @@ impl StdioMcpClient {
         )))
     }
 
-    /// List tools (with caching)
+    /// List tools (with caching and auto-reconnect)
     pub async fn list_tools(&self) -> Result<Vec<McpTool>, ClientError> {
         // Check cache first
         {
@@ -226,6 +226,23 @@ impl StdioMcpClient {
             }
         }
 
+        match self.list_tools_inner().await {
+            Ok(tools) => Ok(tools),
+            Err(e) if Self::is_transport_error(&e) => {
+                tracing::warn!(
+                    "{}: transport error on list_tools, reconnecting: {}",
+                    self.config.name, e
+                );
+                self.disconnect();
+                self.ensure_started().await?;
+                self.list_tools_inner().await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Inner list_tools implementation
+    async fn list_tools_inner(&self) -> Result<Vec<McpTool>, ClientError> {
         let peer = self
             .peer
             .read()
@@ -254,11 +271,32 @@ impl StdioMcpClient {
         Ok(mcp_tools)
     }
 
-    /// Call a tool
+    /// Call a tool (with auto-reconnect on transport error)
     pub async fn call_tool(
         &self,
         name: &str,
         arguments: Value,
+    ) -> Result<ToolCallResult, ClientError> {
+        match self.call_tool_inner(name, &arguments).await {
+            Ok(result) => Ok(result),
+            Err(e) if Self::is_transport_error(&e) => {
+                tracing::warn!(
+                    "{}: transport error on call_tool({}), reconnecting: {}",
+                    self.config.name, name, e
+                );
+                self.disconnect();
+                self.ensure_started().await?;
+                self.call_tool_inner(name, &arguments).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Inner call_tool implementation
+    async fn call_tool_inner(
+        &self,
+        name: &str,
+        arguments: &Value,
     ) -> Result<ToolCallResult, ClientError> {
         tracing::debug!("call_tool: {} args={}", name, arguments);
 
@@ -270,7 +308,7 @@ impl StdioMcpClient {
 
         // Convert Value to serde_json::Map
         let args_map = match arguments {
-            Value::Object(map) => map,
+            Value::Object(map) => map.clone(),
             Value::Null => serde_json::Map::new(),
             _ => {
                 return Err(ClientError::Rpc {
@@ -319,9 +357,28 @@ impl StdioMcpClient {
 
     /// Stop the subprocess
     pub async fn stop(&self) {
+        self.disconnect();
+        tracing::info!("{} stdio client stopped", self.config.name);
+    }
+
+    /// Clear peer and tools cache (e.g. on transport error)
+    fn disconnect(&self) {
         *self.peer.write() = None;
         *self.tools_cache.write() = None;
-        tracing::info!("{} stdio client stopped", self.config.name);
+    }
+
+    /// Check if a ClientError indicates a transport-level failure
+    fn is_transport_error(e: &ClientError) -> bool {
+        match e {
+            ClientError::Rpc { message, .. } => {
+                message.contains("Transport")
+                    || message.contains("disconnected")
+                    || message.contains("broken pipe")
+                    || message.contains("channel closed")
+            }
+            ClientError::NotConnected => true,
+            _ => false,
+        }
     }
 
     /// Check if running

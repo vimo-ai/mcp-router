@@ -23,6 +23,7 @@ enum GlobalConfigProviders {
         ClaudeGlobalConfigProvider(),
         CodexGlobalConfigProvider(),
         GeminiGlobalConfigProvider(),
-        OpenCodeGlobalConfigProvider()
+        OpenCodeGlobalConfigProvider(),
+        QwenCodeGlobalConfigProvider()
     ]
 }
